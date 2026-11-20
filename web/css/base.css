@@ -49,9 +49,10 @@ body {
 }
 
 /* ==========================================================================
-   FULL-VIEWPORT MAP CANVAS
-   Note: Dark mode map tiles are handled natively in js/map.js by switching
-   the CARTO tile URL from 'light_all' to 'dark_all'
+   FULL-VIEWPORT MAP CANVAS & MINIMALIST TILE STYLING
+   Desaturates standard OpenStreetMap tiles (grayscale) so Light Mode looks
+   like a clean white/light-gray canvas and Dark Mode inverts cleanly into
+   dark charcoal without muddy neon color artifacts.
    ========================================================================== */
 #map {
     position: relative;
@@ -65,10 +66,6 @@ body {
 .leaflet-tile-pane {
     filter: grayscale(100%) brightness(106%) contrast(92%);
     transition: filter 0.3s ease, opacity 0.3s ease;
-}
-
-body.dark-mode #map {
-    background-color: #1e293b;
 }
 
 body.dark-mode .leaflet-tile-pane {
