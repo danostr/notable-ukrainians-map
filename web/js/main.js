@@ -1,136 +1,126 @@
 /**
- * main.js
+ * ============================================================================
+ * main.js — ES Module Entry Point & UI Event Orchestrator
+ * ----------------------------------------------------------------------------
+ * Bootstraps the application using a two-stage progressive loading strategy
+ * and binds global UI event listeners (category dropdowns, dark mode toggle,
+ * Escape key handler, panel close buttons, and debounced panel search).
+ * ============================================================================
  */
-import { state } from './state.js';
-import { map, renderMarkers } from './map.js';
-import { initSearch } from './search.js';
-import { updateDropdownCounts, closeAllPanels, handleEscape, applyPanelFiltersAndRender } from './ui.js'; 
 
-document.addEventListener('DOMContentLoaded', () => {
-    
+import { state } from './state.js';
+import { loadInitialMapData, loadBackgroundData } from './dataLoader.js';
+import { map, renderMarkers, setMapTheme } from './map.js';
+import { initSearch, debounce } from './search.js';
+import {
+    updateDropdownCounts,
+    closeAllPanels,
+    handleEscape,
+    applyPanelFiltersAndRender
+} from './ui.js';
+
+document.addEventListener('DOMContentLoaded', async () => {
     const mainFilter = document.getElementById('topic-filter');
     const subFilter = document.getElementById('sub-topic-filter');
     const subLabel = document.getElementById('sub-topic-label');
 
-    Promise.all([
-        fetch('data/map_lite.json').then(res => res.json()),
-        fetch('data/topic_map.json').then(res => res.json())
-    ])
-    .then(([liteData, topicData]) => {
-        state.allPeople = liteData.map(person => {
-            if (typeof person[3] === 'string') {
-                return [
-                    person[0], person[1], person[2],
-                    [[person[3], person[4] || 'Unknown']],
-                    person[5], person[6] || []
-                ];
-            } else if (!person[3]) {
-                person[3] = [["Other", "Unknown"]];
-            }
-            return person;
-        });
-        
-        for (const mainTopic in topicData) {
-            state.subTopicsMap[mainTopic] = ["All", ...Object.keys(topicData[mainTopic])];
-        }
+    // ========================================================================
+    // TWO-STAGE PROGRESSIVE DATA BOOTSTRAP
+    // Stage 1 loads lightweight coordinates (`map_lite.json`) so markers appear
+    // on screen immediately. Stage 2 fetches full biographies and search indexes
+    // in the background without delaying initial map interactivity.
+    // ========================================================================
+    try {
+        await loadInitialMapData();
+        updateDropdownCounts(mainFilter);
+        await renderMarkers();
 
-        updateDropdownCounts(mainFilter); 
-        renderMarkers(); 
+        // Stage 2: Background fetch for detailed popups & autocomplete search
+        await loadBackgroundData();
+        initSearch();
+    } catch (err) {
+        console.error('Application startup error:', err);
+    }
 
-        Promise.all([
-            fetch('data/people_details.json').then(res => res.json()),
-            fetch('data/search_index.json').then(res => res.json())
-        ])
-        .then(([detailsData, searchData]) => {
-            state.peopleDetails = detailsData;
-            state.searchIndex = searchData; 
-            initSearch(); 
-            console.log("Background data and search index fully loaded!");
-        })
-        .catch(err => console.error("Error loading background data:", err));
-    })
-    .catch(err => console.error("Error loading JSON data:", err));
-
-    mainFilter.addEventListener('change', function(e) {
+    // ========================================================================
+    // TWO-LEVEL CATEGORY FILTER CONTROLS
+    // ========================================================================
+    mainFilter.addEventListener('change', e => {
         const selectedMain = e.target.value;
-        subFilter.innerHTML = ''; 
-        
+        subFilter.innerHTML = '';
+
         if (selectedMain !== 'all' && state.subTopicsMap[selectedMain]) {
-            subFilter.style.display = 'block';
-            subLabel.style.display = 'inline-block';
-            
+            subFilter.classList.remove('is-hidden');
+            subLabel.classList.remove('is-hidden');
+
             const subTopics = state.subTopicsMap[selectedMain];
-            
+
             if (subTopics.length === 2) {
-                const singleSubTopic = subTopics[1]; 
-                const opt = document.createElement('option');
-                opt.value = singleSubTopic;
+                // Only "All" and 1 real sub-category exist: select and lock it
+                const singleSubTopic = subTopics[1];
                 const count = state.topicCounts.sub[`${selectedMain}|${singleSubTopic}`] || 0;
-                opt.innerText = `${singleSubTopic} (${count.toLocaleString()})`;
-                subFilter.appendChild(opt);
-                subFilter.disabled = true;       
-                subFilter.style.opacity = '1.0'; 
+                subFilter.add(new Option(`${singleSubTopic} (${count.toLocaleString()})`, singleSubTopic));
+                subFilter.disabled = true;
             } else {
                 subFilter.disabled = false;
-                subFilter.style.opacity = '1';
-                subFilter.style.cursor = 'pointer';
-                
-                subTopics.forEach(st => {
-                    const opt = document.createElement('option');
-                    opt.value = st;
-                    let count = 0;
-                    if (st === 'All') {
-                        count = state.topicCounts.main[selectedMain] || 0;
-                        opt.innerText = `All (${count.toLocaleString()})`;
-                    } else {
-                        count = state.topicCounts.sub[`${selectedMain}|${st}`] || 0;
-                        opt.innerText = `${st} (${count.toLocaleString()})`;
-                    }
-                    subFilter.appendChild(opt);
-                });
-                subFilter.value = 'All'; 
+                for (const st of subTopics) {
+                    const count = st === 'All'
+                        ? (state.topicCounts.main[selectedMain] || 0)
+                        : (state.topicCounts.sub[`${selectedMain}|${st}`] || 0);
+                    subFilter.add(new Option(`${st} (${count.toLocaleString()})`, st));
+                }
+                subFilter.value = 'All';
             }
         } else {
-            subFilter.style.display = 'none';
-            subLabel.style.display = 'none';
-            subFilter.disabled = false; 
+            subFilter.classList.add('is-hidden');
+            subLabel.classList.add('is-hidden');
+            subFilter.disabled = false;
         }
-        renderMarkers(); 
+
+        renderMarkers();
     });
 
     subFilter.addEventListener('change', () => renderMarkers());
 
+    // ========================================================================
+    // THEME TOGGLE (Swaps both CSS tokens and CARTO basemap tiles)
+    // ========================================================================
     const themeToggle = document.getElementById('theme-toggle');
     if (themeToggle) {
-        themeToggle.addEventListener('click', function() {
-            document.body.classList.toggle('dark-mode');
-            renderMarkers(); 
-            themeToggle.innerText = document.body.classList.contains('dark-mode') ? '☀️ Switch to Light Mode' : '🌙 Switch to Dark Mode';
+        themeToggle.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark-mode');
+            setMapTheme(isDark);
+            renderMarkers();
+            themeToggle.textContent = isDark ? '☀️ Switch to Light Mode' : '🌙 Switch to Dark Mode';
         });
     }
 
-    document.addEventListener('keydown', function(e) {
+    // ========================================================================
+    // PANEL DISMISSAL (Escape Key & data-close-panel Buttons)
+    // ========================================================================
+    document.addEventListener('keydown', e => {
         if (e.key === 'Escape') handleEscape(map);
     });
 
-    document.body.addEventListener('click', function(e) {
-        const closeBtn = e.target.closest('[class*="close"]');
+    document.body.addEventListener('click', e => {
+        const closeBtn = e.target.closest('[data-close-panel]');
         if (!closeBtn) return;
 
-        if (closeBtn.closest('#person-detail-panel')) {
-            document.getElementById('person-detail-panel').classList.remove('open');
-        } else if (closeBtn.closest('#cluster-list-panel')) {
-            document.getElementById('cluster-list-panel').classList.remove('open');
-            document.getElementById('person-detail-panel').classList.remove('open'); 
-            document.querySelectorAll('.active-pulse').forEach(el => el.classList.remove('active-pulse'));
+        const targetPanel = closeBtn.getAttribute('data-close-panel');
+        if (targetPanel === 'detail') {
+            document.getElementById('person-detail-panel')?.classList.remove('open');
+        } else if (targetPanel === 'cluster') {
+            closeAllPanels(map);
         }
     });
 
-    // Wire up Search & Sort logic to the central in-memory engine!
+    // ========================================================================
+    // IN-PANEL LIVE FILTER & SORT CONTROLS (Debounced for large clusters)
+    // ========================================================================
     const panelSearch = document.getElementById('panel-search');
     const panelSort = document.getElementById('panel-sort');
     if (panelSearch && panelSort) {
-        panelSearch.addEventListener('input', () => applyPanelFiltersAndRender(map));
+        panelSearch.addEventListener('input', debounce(() => applyPanelFiltersAndRender(map), 120));
         panelSort.addEventListener('change', () => applyPanelFiltersAndRender(map));
     }
 });
