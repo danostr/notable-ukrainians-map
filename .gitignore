@@ -14,3 +14,4 @@ etl/processed/
 
 # testing
 .pytest_cache/
+.ruff_cache/
