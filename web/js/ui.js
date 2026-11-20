@@ -256,9 +256,10 @@ export function renderPanelList(mapInstance, query = '') {
             document.getElementById('person-detail-panel').classList.add('open');
 
             if (mapInstance && Number.isFinite(person.lat) && Number.isFinite(person.lon)) {
-                mapInstance.flyTo([person.lat, person.lon], mapInstance.getMaxZoom(), {
+                const cityZoom = Math.min(Math.max(mapInstance.getZoom(), 12), 13);
+                mapInstance.flyTo([person.lat, person.lon], cityZoom, {
                     paddingTopLeft: getFlyToPadding({ includeDetailPanel: true }),
-                    duration: 0.8
+                    duration: 0.6
                 });
             }
         });

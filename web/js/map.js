@@ -9,7 +9,13 @@
  */
 
 import { state } from './state.js';
-import { generatePopupHTML, closeAllPanels, resetPanelControls, applyPanelFiltersAndRender } from './ui.js';
+import {
+    generatePopupHTML,
+    closeAllPanels,
+    resetPanelControls,
+    getFlyToPadding,
+    applyPanelFiltersAndRender
+} from './ui.js';
 
 const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
@@ -31,6 +37,7 @@ export const map = L.map('map', {
 
 L.tileLayer(OSM_TILE_URL, {
     maxZoom: 19,
+    keepBuffer: 15, // Retains a 6-tile cache ring around the viewport to prevent blank squares on zoom
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 }).addTo(map);
 
@@ -210,7 +217,8 @@ markersLayer.on('click', async function (e) {
     const clusterId = marker.clusterId;
     const expansionZoom = await askWorker('getClusterExpansionZoom', { clusterId });
 
-    if (expansionZoom > 19) {
+    // Once at city zoom (> 13), open the paginated side panel instead of zooming into streets
+    if (expansionZoom > 13) {
         const leaves = await askWorker('getLeaves', { clusterId, limit: Infinity });
         if (!leaves || leaves.length === 0) return;
 
@@ -230,7 +238,20 @@ markersLayer.on('click', async function (e) {
         resetPanelControls();
         applyPanelFiltersAndRender(map);
         panel.classList.add('open');
+
+        // Keep the city centered in the visible area beside the left panel at city zoom (max 13)
+        const cityZoom = Math.min(Math.max(map.getZoom(), 11), 13);
+        map.setView(marker.getLatLng(), cityZoom, { animate: true });
     } else {
-        map.flyTo(marker.getLatLng(), expansionZoom, { duration: 0.5 });
+        const MIN_ZOOM_STEP = 2;
+        const MAX_ZOOM_STEP = 3;
+        const currentZoom = map.getZoom();
+        const steppedZoom = Math.max(
+            currentZoom + MIN_ZOOM_STEP,
+            Math.min(expansionZoom, currentZoom + MAX_ZOOM_STEP)
+        );
+        const targetZoom = Math.min(13, steppedZoom);
+
+        map.setView(marker.getLatLng(), targetZoom, { animate: true });
     }
 });

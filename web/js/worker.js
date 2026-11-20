@@ -23,7 +23,7 @@ self.onmessage = function (e) {
         if (type === 'load') {
             index = new Supercluster({
                 radius: 180,  // Grouping radius in pixels (keeps map visually clean)
-                maxZoom: 19,  // Above zoom 19, clusters open the side panel instead
+                maxZoom: 13,  // Stop splitting at city level (13) and hand off to side panel
                 minPoints: 2  // Minimum points required to form a cluster bubble
             });
             index.load(payload.geoJsonData || []);
@@ -32,9 +32,8 @@ self.onmessage = function (e) {
         }
 
         // Guard: Always reply with an empty fallback if queried before 'load' finishes
-        // so pending Promises on the main thread never hang indefinitely.
         if (!index) {
-            const fallback = type === 'getClusterExpansionZoom' ? 19 : [];
+            const fallback = type === 'getClusterExpansionZoom' ? 13 : [];
             self.postMessage({ id, result: fallback });
             return;
         }
