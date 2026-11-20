@@ -61,3 +61,17 @@ body {
     background-color: var(--bg-map);
     transition: background-color var(--transition-fast);
 }
+
+.leaflet-tile-pane {
+    filter: grayscale(100%) brightness(106%) contrast(92%);
+    transition: filter 0.3s ease, opacity 0.3s ease;
+}
+
+body.dark-mode #map {
+    background-color: #1e293b;
+}
+
+body.dark-mode .leaflet-tile-pane {
+    filter: grayscale(100%) invert(100%) brightness(90%) contrast(105%);
+    opacity: 0.82;
+}

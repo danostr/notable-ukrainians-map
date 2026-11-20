@@ -11,10 +11,7 @@
 import { state } from './state.js';
 import { generatePopupHTML, closeAllPanels, resetPanelControls, applyPanelFiltersAndRender } from './ui.js';
 
-const TILE_URLS = {
-    light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-};
+const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 // Prevent users from panning infinitely into empty gray void beyond world bounds
 const globeBounds = L.latLngBounds(L.latLng(-75, -200), L.latLng(85, 200));
@@ -31,17 +28,18 @@ export const map = L.map('map', {
     maxBoundsViscosity: 1.0
 });
 
-const baseTileLayer = L.tileLayer(TILE_URLS.light, {
+L.tileLayer(OSM_TILE_URL, {
     maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors, &copy; CARTO'
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 }).addTo(map);
 
 export const markersLayer = L.featureGroup().addTo(map);
 
-// Swaps the CARTO basemap URL directly between light_all and dark_all
-export function setMapTheme(isDark) {
-    baseTileLayer.setUrl(isDark ? TILE_URLS.dark : TILE_URLS.light);
-}
+/**
+ * Kept as a hook for main.js; Dark Mode tile styling is handled via CSS
+ * on `.leaflet-tile-pane` in `css/base.css` so only one tile set is needed.
+ */
+export function setMapTheme() { }
 
 // ============================================================================
 // WEB WORKER ASYNC REQUEST/RESPONSE BRIDGE
