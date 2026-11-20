@@ -25,19 +25,22 @@ const globeBounds = L.latLngBounds(L.latLng(-75, -200), L.latLng(85, 200));
 export const map = L.map('map', {
     preferCanvas: true,
     renderer: L.canvas({ padding: 0.5 }), // Matches getBounds().pad(0.5) so markers don't clip during flyTo
+    fadeAnimation: false,                 // Renders tiles immediately upon arrival instead of a 200ms opacity fade
     center: [48.3794, 31.1656],
     zoom: 6,
-    minZoom: 2.25,
-    zoomDelta: 0.6,
-    zoomSnap: 0.15,
-    wheelPxPerZoomLevel: 60,
+    minZoom: 2.5,
+    zoomDelta: 0.5,
+    zoomSnap: 0.5,
+    wheelPxPerZoomLevel: 80,
     maxBounds: globeBounds,
     maxBoundsViscosity: 1.0
 });
 
 L.tileLayer(OSM_TILE_URL, {
     maxZoom: 19,
-    keepBuffer: 15, // Retains a 6-tile cache ring around the viewport to prevent blank squares on zoom
+    keepBuffer: 6,            // Pre-caches a wider offscreen ring so single wheel zoom-outs already have border tiles loaded
+    updateWhenIdle: false,    // Pre-fetches edge tiles during pans
+    updateWhenZooming: false, // Skips intermediate zoom-level requests so final zoom tiles download first
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 }).addTo(map);
 
