@@ -17,8 +17,9 @@ const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const globeBounds = L.latLngBounds(L.latLng(-75, -200), L.latLng(85, 200));
 
 export const map = L.map('map', {
-    preferCanvas: true, // Renders individual person circleMarkers on HTML5 Canvas for speed
-    center: [48.3794, 31.1656], // Geographic center of Ukraine
+    preferCanvas: true,
+    renderer: L.canvas({ padding: 0.5 }), // Matches getBounds().pad(0.5) so markers don't clip during flyTo
+    center: [48.3794, 31.1656],
     zoom: 6,
     minZoom: 2.25,
     zoomDelta: 0.6,
@@ -185,10 +186,8 @@ async function updateScreen() {
 // MAP INTERACTION LISTENERS
 // ============================================================================
 
-let renderTimer = null;
 map.on('moveend', () => {
-    clearTimeout(renderTimer);
-    renderTimer = setTimeout(updateScreen, 50);
+    updateScreen();
 });
 
 map.on('click', e => {

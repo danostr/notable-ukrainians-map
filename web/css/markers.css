@@ -7,16 +7,15 @@
 
 /* ==========================================================================
    1. SUPERCLUSTER BUBBLES (Small < 50, Medium < 500, Large >= 500)
+   Note: Never put `transition: transform` on `.leaflet-marker-icon` itself—
+   Leaflet uses inline `transform: translate3d()` to position markers every
+   frame, so transitioning it makes markers lag behind the map during zoom.
    ========================================================================== */
 .leaflet-marker-icon.marker-cluster {
     border-radius: 50%;
     text-align: center;
     background-clip: padding-box;
-    transition: transform var(--transition-fast);
-}
-
-.leaflet-marker-icon.marker-cluster:hover {
-    transform: scale(1.08);
+    user-select: none;
 }
 
 .leaflet-marker-icon.marker-cluster div {
@@ -31,6 +30,11 @@
     font-weight: 700;
     text-align: center;
     text-shadow: var(--cluster-text-shadow);
+    transition: transform var(--transition-fast);
+}
+
+.leaflet-marker-icon.marker-cluster:hover div {
+    transform: scale(1.1);
 }
 
 .leaflet-marker-icon.marker-cluster-small {
