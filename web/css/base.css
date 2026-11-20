@@ -1,0 +1,72 @@
+/* ==========================================================================
+   base.css — Global Resets, Scrollbars, Utilities & Map Canvas
+   --------------------------------------------------------------------------
+   Establishes a full-viewport (100vw x 100vh) non-scrolling app shell so
+   floating UI controls and slide-out panels layer cleanly over the map.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-body);
+    background-color: var(--bg-map);
+    overflow: hidden;
+    /* Prevents outer page scrollbars; panels scroll internally */
+}
+
+/* Utility class toggled by JS instead of inline style.display = 'none' */
+.is-hidden {
+    display: none !important;
+}
+
+/* ==========================================================================
+   CUSTOM SLIM SCROLLBARS
+   ========================================================================== */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* ==========================================================================
+   FULL-VIEWPORT MAP CANVAS & MINIMALIST TILE STYLING
+   Desaturates standard OpenStreetMap tiles (grayscale) so Light Mode looks
+   like a clean white/light-gray canvas and Dark Mode inverts cleanly into
+   dark charcoal without muddy neon color artifacts.
+   ========================================================================== */
+#map {
+    position: relative;
+    z-index: var(--z-map);
+    height: 100vh;
+    width: 100vw;
+    background-color: var(--bg-map);
+    transition: background-color var(--transition-fast);
+}
+
+.leaflet-tile {
+    filter: grayscale(100%) brightness(102%) contrast(94%);
+}
+
+body.dark-mode .leaflet-tile {
+    filter: grayscale(100%) invert(100%) brightness(90%) contrast(105%) opacity(0.82);
+}

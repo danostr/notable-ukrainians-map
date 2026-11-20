@@ -1,0 +1,270 @@
+/* ==========================================================================
+   panels.css — Slide-Out Location List & Person Detail Panels
+   ========================================================================== */
+
+/* ==========================================================================
+   1. SHARED PANEL HEADERS & CLOSE BUTTONS
+   ========================================================================== */
+.panel-header {
+    padding: var(--space-lg);
+    background: var(--cluster-header-bg);
+    color: var(--cluster-header-text);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.panel-header--stacked {
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.panel-header__top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: var(--space-sm);
+}
+
+.panel-header h2 {
+    margin: 0;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.panel-subtitle {
+    font-size: 0.85em;
+    opacity: 0.9;
+    margin-top: var(--space-xs);
+}
+
+.close-panel {
+    background: none;
+    border: none;
+    color: inherit;
+    padding: 0 4px;
+    line-height: 1;
+    cursor: pointer;
+    font-size: 24px;
+    opacity: 0.75;
+    transition: opacity var(--transition-fast);
+}
+
+.close-panel:hover {
+    opacity: 1;
+}
+
+/* ==========================================================================
+   2. LEFT DRAWER: CLUSTER / REGION PEOPLE LIST
+   ========================================================================== */
+#cluster-list-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--list-panel-width);
+    height: 100vh;
+    background: var(--bg-surface);
+    color: var(--text-body);
+    z-index: var(--z-panel-list);
+    box-shadow: var(--shadow-panel-right);
+    display: flex;
+    flex-direction: column;
+
+    /* Hidden off-canvas to the left; slides in smoothly on .open */
+    transform: translate3d(-100%, 0, 0);
+    visibility: hidden;
+    transition: transform var(--transition-drawer), visibility 0s linear 0.38s;
+}
+
+#cluster-list-panel.open {
+    transform: translate3d(0, 0, 0);
+    visibility: visible;
+    transition: transform var(--transition-drawer), visibility 0s linear 0s;
+}
+
+/* In-panel search & sort bar */
+.panel-controls {
+    padding: 10px var(--space-md);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    gap: var(--space-sm);
+    background: var(--bg-surface);
+}
+
+#panel-search {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--border-input);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    outline: none;
+}
+
+#panel-sort {
+    padding: 6px;
+    border: 1px solid var(--border-input);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+#list-content {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg-surface);
+}
+
+.list-item {
+    padding: var(--space-md) var(--space-lg);
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+    transition: background-color var(--transition-fast);
+}
+
+.list-item:hover {
+    background-color: var(--bg-surface-hover);
+}
+
+.list-item__topic {
+    font-size: 0.85em;
+    color: var(--text-muted);
+}
+
+/* ==========================================================================
+   3. DETAIL PANEL: INDIVIDUAL BIOGRAPHY CARD
+   ========================================================================== */
+#person-detail-panel {
+    position: absolute;
+    bottom: 0;
+    left: calc(var(--list-panel-width) + var(--space-lg));
+    width: var(--detail-panel-width);
+    height: var(--detail-panel-height);
+    background: var(--bg-surface);
+    color: var(--text-body);
+    z-index: var(--z-panel-detail);
+    box-shadow: var(--shadow-panel-up);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    /* Hidden below the bottom viewport edge; rises smoothly on .open */
+    transform: translate3d(0, 105%, 0);
+    visibility: hidden;
+    transition: transform var(--transition-sheet), visibility 0s linear 0.45s;
+}
+
+#person-detail-panel.open {
+    transform: translate3d(0, 0, 0);
+    visibility: visible;
+    transition: transform var(--transition-sheet), visibility 0s linear 0s;
+}
+
+#person-detail-panel .panel-header {
+    background: var(--detail-header-bg);
+    color: var(--detail-header-text);
+    border-bottom: 1px solid var(--border-default);
+}
+
+#detail-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-xl);
+    line-height: 1.6;
+}
+
+/* ==========================================================================
+   4. WIKIPEDIA LANGUAGE PILL BUTTONS (EN / UK / RU)
+   ========================================================================== */
+.wiki-button-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.leaflet-container a.wiki-btn,
+#detail-content a.wiki-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    border: 1px solid transparent;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+}
+
+.leaflet-container a.btn-en,
+#detail-content a.btn-en {
+    background: var(--wiki-en-bg);
+    color: var(--wiki-en-text);
+}
+
+.leaflet-container a.btn-uk,
+#detail-content a.btn-uk {
+    background: var(--wiki-uk-bg);
+    color: var(--wiki-uk-text);
+}
+
+.leaflet-container a.btn-ru,
+#detail-content a.btn-ru {
+    background: var(--wiki-ru-bg);
+    color: var(--wiki-ru-text);
+}
+
+.leaflet-container a.wiki-btn:hover,
+#detail-content a.wiki-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    filter: brightness(95%);
+}
+
+/* ==========================================================================
+   5. PAGINATION "LOAD MORE" BUTTON
+   ========================================================================== */
+.load-more-btn {
+    width: calc(100% - 40px);
+    margin: var(--space-md) var(--space-lg) var(--space-xl) var(--space-lg);
+    padding: 12px;
+    background: var(--btn-more-bg);
+    border: 1px solid var(--btn-more-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--btn-more-text);
+    box-shadow: var(--shadow-sm);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.load-more-btn:hover {
+    background: var(--btn-more-bg-hover);
+    border-color: var(--btn-more-border-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* ==========================================================================
+   6. RESPONSIVE MOBILE / TABLET PANELS
+   ========================================================================== */
+@media (max-width: 768px) {
+    #cluster-list-panel {
+        width: 100vw;
+    }
+
+    #person-detail-panel {
+        left: 0;
+        width: 100vw;
+        height: 65vh;
+        z-index: calc(var(--z-panel-list) + 5);
+        /* Sits above list panel when opened on mobile */
+    }
+}
