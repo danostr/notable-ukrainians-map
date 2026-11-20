@@ -1,41 +1,110 @@
 /**
- * ui.js
- * Handles DOM manipulation, panel toggling, dropdown generation, and HTML rendering.
+ * ============================================================================
+ * ui.js — DOM Rendering, Localization, XSS Escaping & Side Panel Pagination
+ * ----------------------------------------------------------------------------
+ * Responsible for building safe HTML cards, selecting English vs. Cyrillic
+ * names based on user input, calculating responsive map camera offsets, and
+ * paginating large location lists in 50-item DOM chunks.
+ * ============================================================================
  */
+
 import { state } from './state.js';
 
-// Centralized localization handler
-export function getLocalizedName(details, query, fallback) {
+/**
+ * Escapes HTML special characters so untrusted Wikipedia strings cannot break
+ * DOM structure or inject markup when rendered via .innerHTML.
+ */
+export function escapeHTML(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/**
+ * Ensures external Wikipedia URLs use safe http/https schemes before rendering
+ * inside <a href="...">.
+ */
+function sanitizeWikiUrl(url) {
+    if (typeof url !== 'string') return null;
+    const trimmed = url.trim();
+    return /^https?:\/\//i.test(trimmed) ? escapeHTML(trimmed) : null;
+}
+
+/**
+ * Computes responsive `paddingTopLeft` offsets for Leaflet `flyTo` / `flyToBounds`
+ * so target markers stay centered in the visible map area beside open drawers.
+ * Returns [0, 0] on mobile viewports where drawers cover the full width.
+ */
+export function getFlyToPadding({ includeDetailPanel = false } = {}) {
+    if (window.innerWidth <= 768) {
+        return [0, 0];
+    }
+    const listPanelOpen = document.getElementById('cluster-list-panel')?.classList.contains('open');
+    const detailPanelOpen = includeDetailPanel || document.getElementById('person-detail-panel')?.classList.contains('open');
+
+    if (detailPanelOpen) return [790, 0]; // 350px list + 20px gap + 400px detail + 20px margin
+    if (listPanelOpen) return [370, 0];   // 350px list + 20px margin
+    return [0, 0];
+}
+
+/**
+ * Automatic Cyrillic vs. Latin Script Detection:
+ * If the user types in Cyrillic (Ukrainian/Russian alphabet), prioritize
+ * `name_uk` -> `name_ru` -> `name_en`. Otherwise default to English first.
+ */
+export function getLocalizedName(details, query, fallback = 'Unknown Name') {
     if (!details) return fallback;
-    const isCyrillic = /[а-яіїєґё]/i.test(query);
-    if (isCyrillic) return details.name_uk || details.name_ru || details.name_en || fallback;
+    const isCyrillic = /[а-яіїєґё]/i.test(query || '');
+    if (isCyrillic) {
+        return details.name_uk || details.name_ru || details.name_en || fallback;
+    }
     return details.name_en || details.name_uk || details.name_ru || fallback;
 }
 
+/**
+ * Generates the biography card HTML used both inside Leaflet map popups and
+ * inside `#person-detail-panel`.
+ */
 export function generatePopupHTML(basicData) {
     const details = state.peopleDetails[basicData.id];
-    if (!details) return `<div class="popup-container"><p>Loading details...</p></div>`;
+    if (!details) {
+        return `<div class="popup-container"><p class="popup-body">Loading details...</p></div>`;
+    }
 
-    let wikiButtonsHTML = `<div class="wiki-button-container">`;
-    if (details.wiki_en) wikiButtonsHTML += `<a href="${details.wiki_en}" target="_blank" class="wiki-btn btn-en">EN</a>`;
-    if (details.wiki_uk) wikiButtonsHTML += `<a href="${details.wiki_uk}" target="_blank" class="wiki-btn btn-uk">UA</a>`;
-    if (details.wiki_ru) wikiButtonsHTML += `<a href="${details.wiki_ru}" target="_blank" class="wiki-btn btn-ru">RU</a>`;
-    wikiButtonsHTML += `</div>`;
+    const wikiLinks = [
+        { url: sanitizeWikiUrl(details.wiki_en), cls: 'btn-en', label: 'EN' },
+        { url: sanitizeWikiUrl(details.wiki_uk), cls: 'btn-uk', label: 'UA' },
+        { url: sanitizeWikiUrl(details.wiki_ru), cls: 'btn-ru', label: 'RU' }
+    ].filter(item => item.url);
 
-    const occupationsHTML = (details.occupations && details.occupations.length > 0) 
-        ? `<p class="popup-detail"><b>Occupation:</b> ${details.occupations.join(', ')}</p>` : '';
+    const wikiButtonsHTML = wikiLinks.length > 0
+        ? `<div class="wiki-button-container">${wikiLinks.map(w => `<a href="${w.url}" target="_blank" rel="noopener noreferrer" class="wiki-btn ${w.cls}">${w.label}</a>`).join('')}</div>`
+        : '';
 
-    const displayName = details.name_en || details.name_uk || details.name_ru || "Unknown Name";
+    const occupationsHTML = (Array.isArray(details.occupations) && details.occupations.length > 0)
+        ? `<p class="popup-detail"><b>Occupation:</b> ${escapeHTML(details.occupations.join(', '))}</p>`
+        : '';
 
-    const firstCategory = (basicData.categories && basicData.categories.length > 0) ? basicData.categories[0] : ["Other", "Unknown"];
-    const categoriesHTML = `<span class="popup-category" style="display:inline-block; margin-bottom:4px;">${firstCategory[0]}${firstCategory[1] !== 'Unknown' ? ` > ${firstCategory[1]}` : ''}</span>`;
+    const displayName = escapeHTML(details.name_en || details.name_uk || details.name_ru || 'Unknown Name');
+    const birthplace = escapeHTML(details.birthplace || 'Unknown');
+
+    const firstCategory = (Array.isArray(basicData.categories) && basicData.categories.length > 0)
+        ? basicData.categories[0]
+        : ['Other', 'Unknown'];
+    const categoryText = firstCategory[1] && firstCategory[1] !== 'Unknown'
+        ? `${firstCategory[0]} > ${firstCategory[1]}`
+        : firstCategory[0];
 
     return `
         <div class="popup-container">
             <h3 class="popup-title">${displayName}</h3>
             <div class="popup-body">
-                <p class="popup-detail"><b>Birthplace:</b> ${details.birthplace || 'Unknown'}</p>
-                <div style="margin-bottom: 8px;">${categoriesHTML}</div>
+                <p class="popup-detail"><b>Birthplace:</b> ${birthplace}</p>
+                <div><span class="popup-category">${escapeHTML(categoryText)}</span></div>
                 ${occupationsHTML}
                 ${wikiButtonsHTML}
             </div>
@@ -44,57 +113,17 @@ export function generatePopupHTML(basicData) {
 }
 
 export function closeAllPanels(mapInstance) {
-    const detailPanel = document.getElementById('person-detail-panel');
-    const listPanel = document.getElementById('cluster-list-panel');
-    
-    if (detailPanel) detailPanel.classList.remove('open');
-    if (listPanel) listPanel.classList.remove('open');
-    
+    document.getElementById('person-detail-panel')?.classList.remove('open');
+    document.getElementById('cluster-list-panel')?.classList.remove('open');
     document.querySelectorAll('.active-pulse').forEach(el => el.classList.remove('active-pulse'));
     if (mapInstance) mapInstance.closePopup();
-}
-
-export function updateDropdownCounts(mainFilter) {
-    let totalPeople = 0;
-    state.topicCounts = { main: {}, sub: {} }; 
-
-    state.allPeople.forEach(person => {
-        totalPeople++;
-        let categories = person[3]; 
-
-        const uniqueMains = new Set();
-        const uniqueSubs = new Set();
-
-        categories.forEach(c => {
-            uniqueMains.add(c[0]);
-            uniqueSubs.add(`${c[0]}|${c[1]}`);
-        });
-
-        uniqueMains.forEach(main => {
-            state.topicCounts.main[main] = (state.topicCounts.main[main] || 0) + 1;
-        });
-        uniqueSubs.forEach(subKey => {
-            state.topicCounts.sub[subKey] = (state.topicCounts.sub[subKey] || 0) + 1;
-        });
-    });
-
-    mainFilter.innerHTML = '';
-    mainFilter.add(new Option(`All People (${totalPeople.toLocaleString()})`, 'all'));
-
-    Object.keys(state.subTopicsMap).sort().forEach(topic => {
-        const count = state.topicCounts.main[topic] || 0;
-        if (count > 0) mainFilter.add(new Option(`${topic} (${count.toLocaleString()})`, topic));
-    });
-
-    if (state.topicCounts.main["Other"]) {
-        mainFilter.add(new Option(`Other / Unknown (${state.topicCounts.main["Other"].toLocaleString()})`, 'Other'));
-    }
 }
 
 export function handleEscape(mapInstance) {
     const detailPanel = document.getElementById('person-detail-panel');
     const listPanel = document.getElementById('cluster-list-panel');
 
+    // Close the topmost panel first before closing the list panel or popup
     if (detailPanel && detailPanel.classList.contains('open')) {
         detailPanel.classList.remove('open');
         return;
@@ -109,7 +138,49 @@ export function handleEscape(mapInstance) {
     if (mapInstance) mapInstance.closePopup();
 }
 
-// --- PAGINATION & SIDE PANEL ENGINE ---
+/**
+ * Counts unique people per Main Category and Sub-Category and populates
+ * `#topic-filter` with formatted totals.
+ */
+export function updateDropdownCounts(mainFilter) {
+    state.topicCounts = { main: {}, sub: {} };
+
+    for (const person of state.allPeople) {
+        const uniqueMains = new Set();
+        const uniqueSubs = new Set();
+
+        for (const [main, sub] of person.categories) {
+            uniqueMains.add(main);
+            uniqueSubs.add(`${main}|${sub}`);
+        }
+
+        for (const main of uniqueMains) {
+            state.topicCounts.main[main] = (state.topicCounts.main[main] || 0) + 1;
+        }
+        for (const subKey of uniqueSubs) {
+            state.topicCounts.sub[subKey] = (state.topicCounts.sub[subKey] || 0) + 1;
+        }
+    }
+
+    mainFilter.innerHTML = '';
+    mainFilter.add(new Option(`All People (${state.allPeople.length.toLocaleString()})`, 'all'));
+
+    Object.keys(state.subTopicsMap).sort().forEach(topic => {
+        if (topic === 'Other') return;
+        const count = state.topicCounts.main[topic] || 0;
+        if (count > 0) {
+            mainFilter.add(new Option(`${topic} (${count.toLocaleString()})`, topic));
+        }
+    });
+
+    if (state.topicCounts.main['Other']) {
+        mainFilter.add(new Option(`Other / Unknown (${state.topicCounts.main['Other'].toLocaleString()})`, 'Other'));
+    }
+}
+
+// ============================================================================
+// PAGINATION & SIDE PANEL ENGINE
+// ============================================================================
 
 export function resetPanelControls() {
     const search = document.getElementById('panel-search');
@@ -121,79 +192,97 @@ export function resetPanelControls() {
 export function applyPanelFiltersAndRender(mapInstance) {
     const query = (document.getElementById('panel-search')?.value || '').toLowerCase().trim();
     const sortType = document.getElementById('panel-sort')?.value || 'remarkability';
-    
-    // 1. Filter the raw data array in memory
-    let filtered = state.currentPanelPeople.filter(person => {
+
+    // 1. Filter in memory across all 3 name scripts
+    const filtered = state.currentPanelPeople.filter(person => {
         if (!query) return true;
         const details = state.peopleDetails[person.id] || {};
-        const nameEn = (details.name_en || '').toLowerCase();
-        const nameUk = (details.name_uk || '').toLowerCase();
-        const nameRu = (details.name_ru || '').toLowerCase();
-        return nameEn.includes(query) || nameUk.includes(query) || nameRu.includes(query);
+        return (
+            (details.name_en || '').toLowerCase().includes(query) ||
+            (details.name_uk || '').toLowerCase().includes(query) ||
+            (details.name_ru || '').toLowerCase().includes(query)
+        );
     });
-    
-    // 2. Sort the array in memory
+
+    // 2. Sort in memory by Remarkability score (default) or Alphabetical
     filtered.sort((a, b) => {
         const detailsA = state.peopleDetails[a.id] || {};
         const detailsB = state.peopleDetails[b.id] || {};
         if (sortType === 'remarkability') {
             return (detailsB.remarkability || 0) - (detailsA.remarkability || 0);
-        } else {
-            const nameA = getLocalizedName(detailsA, query, "Unknown Name").toLowerCase();
-            const nameB = getLocalizedName(detailsB, query, "Unknown Name").toLowerCase();
-            return nameA.localeCompare(nameB);
         }
+        const nameA = getLocalizedName(detailsA, query).toLowerCase();
+        const nameB = getLocalizedName(detailsB, query).toLowerCase();
+        return nameA.localeCompare(nameB);
     });
-    
-    // 3. Reset pagination chunk and trigger DOM render
+
+    // 3. Reset DOM pagination window to the first 50 records
     state.filteredPanelPeople = filtered;
     state.displayCount = state.ITEMS_PER_PAGE;
     renderPanelList(mapInstance, query);
 }
 
-export function renderPanelList(mapInstance, query = "") {
+/**
+ * Client-Side DOM Pagination:
+ * Renders only `state.displayCount` (initially 50) DOM elements at a time so
+ * opening a city cluster with thousands of people never freezes the browser.
+ */
+export function renderPanelList(mapInstance, query = '') {
     const listContent = document.getElementById('list-content');
     listContent.innerHTML = '';
-    
-    // Slice exactly 50 people for peak DOM performance
+
+    const fragment = document.createDocumentFragment();
     const chunk = state.filteredPanelPeople.slice(0, state.displayCount);
-    
-    chunk.forEach(person => {
+
+    for (const person of chunk) {
         const details = state.peopleDetails[person.id] || {};
-        const displayName = getLocalizedName(details, query, "Unknown Name");
-        const primaryTopic = (person.categories && person.categories.length > 0 && typeof person.categories[0] !== 'string') ? person.categories[0][0] : "Other";
-        
+        const displayName = getLocalizedName(details, query);
+        const primaryTopic = (person.categories && person.categories.length > 0)
+            ? person.categories[0][0]
+            : 'Other';
+
         const item = document.createElement('div');
         item.className = 'list-item';
-        item.innerHTML = `<div><strong>${displayName}</strong></div><div style="font-size:0.85em; color:gray;">${primaryTopic}</div>`;
-        
-        item.onclick = () => {
-            document.getElementById('detail-name').innerText = displayName;
+        item.innerHTML = `
+            <div><strong>${escapeHTML(displayName)}</strong></div>
+            <div class="list-item__topic">${escapeHTML(primaryTopic)}</div>
+        `;
+
+        item.addEventListener('click', () => {
+            document.getElementById('detail-name').textContent = displayName;
             const detailContent = document.getElementById('detail-content');
             detailContent.innerHTML = generatePopupHTML({ id: person.id, categories: person.categories });
-            if(detailContent.querySelector('.popup-title')) detailContent.querySelector('.popup-title').remove();
+            detailContent.querySelector('.popup-title')?.remove();
             document.getElementById('person-detail-panel').classList.add('open');
-            
-            if (mapInstance && person.lat && person.lon) {
-                mapInstance.flyTo([person.lat, person.lon], mapInstance.getMaxZoom(), { paddingTopLeft: [820, 0], duration: 0.8 });
-            }
-        };
-        listContent.appendChild(item);
-    });
 
-    // Dynamically append the Load More button if there are people left in the array
+            if (mapInstance && Number.isFinite(person.lat) && Number.isFinite(person.lon)) {
+                mapInstance.flyTo([person.lat, person.lon], mapInstance.getMaxZoom(), {
+                    paddingTopLeft: getFlyToPadding({ includeDetailPanel: true }),
+                    duration: 0.8
+                });
+            }
+        });
+
+        fragment.appendChild(item);
+    }
+
+    // Append "Load more" pagination button if more records remain in memory
     if (state.filteredPanelPeople.length > state.displayCount) {
         const remaining = state.filteredPanelPeople.length - state.displayCount;
         const nextAmount = Math.min(state.ITEMS_PER_PAGE, remaining);
-        
+
         const btn = document.createElement('button');
-        btn.className = 'load-more-btn'; // <-- Assign the new CSS class
+        btn.type = 'button';
+        btn.className = 'load-more-btn';
         btn.innerHTML = `Load ${nextAmount} more <span style="font-size: 0.8em; opacity: 0.7;">(${remaining} left)</span>`;
-        
-        btn.onclick = () => {
+
+        btn.addEventListener('click', () => {
             state.displayCount += state.ITEMS_PER_PAGE;
-            renderPanelList(mapInstance, query); 
-        };
-        listContent.appendChild(btn);
+            renderPanelList(mapInstance, query);
+        });
+
+        fragment.appendChild(btn);
     }
+
+    listContent.appendChild(fragment);
 }
