@@ -1,30 +1,63 @@
-/* ==========================================
-   1. BASE RESETS & GLOBAL SCROLLBAR
-   ========================================== */
-body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+/* ==========================================================================
+   base.css — Global Resets, Scrollbars, Utilities & Map Canvas
+   --------------------------------------------------------------------------
+   Establishes a full-viewport (100vw x 100vh) non-scrolling app shell so
+   floating UI controls and slide-out panels layer cleanly over the map.
+   ========================================================================== */
 
-/* Modern Slim Scrollbar */
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { 
-    background: #cbd5e1; 
-    border-radius: 10px; 
-    border: 2px solid transparent; 
-    background-clip: content-box; 
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
 }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-body.dark-mode ::-webkit-scrollbar-thumb { background: #4b5563; }
-body.dark-mode ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    color: var(--text-body);
+    background-color: var(--bg-map);
+    overflow: hidden;
+    /* Prevents outer page scrollbars; panels scroll internally */
+}
 
-/* ==========================================
-   2. MAP CONTAINER & DARK MODE
-   ========================================== */
-#map { height: 100vh; width: 100vw; background-color: #f8f9fa; }
-.leaflet-tile-pane { transition: filter 0.3s ease, opacity 0.3s ease; }
+/* Utility class toggled by JS instead of inline style.display = 'none' */
+.is-hidden {
+    display: none !important;
+}
 
-body.dark-mode #map { background-color: #304779; }
-body.dark-mode .leaflet-tile-pane {
-    filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
-    opacity: 0.7; 
+/* ==========================================================================
+   CUSTOM SLIM SCROLLBARS
+   ========================================================================== */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* ==========================================================================
+   FULL-VIEWPORT MAP CANVAS
+   Note: Dark mode map tiles are handled natively in js/map.js by switching
+   the CARTO tile URL from 'light_all' to 'dark_all'
+   ========================================================================== */
+#map {
+    position: relative;
+    z-index: var(--z-map);
+    height: 100vh;
+    width: 100vw;
+    background-color: var(--bg-map);
+    transition: background-color var(--transition-fast);
 }
