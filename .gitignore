@@ -3,9 +3,14 @@
 # Tells Git which files and folders to exclude from the public repository
 # ==========================================
 
-# Ignore standard Python cache directories to keep the repo clean
+# virtual environments
+.venv/
+venv/
 __pycache__/
 
-# Ignore local debugging logs and personal scratchpad notes
-debug_error.txt
-.ideas.txt
+# ETL intermediate & raw files
+etl/raw/
+etl/processed/
+
+# testing
+.pytest_cache/
