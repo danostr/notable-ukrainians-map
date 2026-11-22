@@ -127,6 +127,29 @@ def export_web_json(skip_tests: bool = False) -> None:
             str(occ).strip() for occ in occupations_raw if occ and str(occ).strip()
         ][:5]
 
+        authority_links: dict[str, str] = {}
+        esu_id = row.get("esu_id")
+        ieu_id = row.get("ieu_id")
+        viaf_id = row.get("viaf_id")
+        if esu_id:
+            authority_links["esu"] = (
+                f"https://esu.com.ua/search_articles.php?id={esu_id}"
+                if str(esu_id).isdigit()
+                else f"https://esu.com.ua/article-{esu_id}"
+            )
+        if ieu_id:
+            authority_links["ieu"] = (
+                f"https://www.encyclopediaofukraine.com/display.asp?linkpath=pages%5C{ieu_id}"
+            )
+        if viaf_id:
+            authority_links["viaf"] = f"https://viaf.org/viaf/{viaf_id}"
+
+        born_in_ua = bool(row.get("born_in_ukraine", True))
+        ua_heritage = bool(row.get("ukrainian_nationality_or_heritage", not born_in_ua))
+        origin_type = row.get("origin_type") or (
+            "born_in_ukraine" if born_in_ua else "ukrainian_nationality_or_heritage"
+        )
+
         people_details[qid] = {
             "name_en": row["name_en"],
             "name_uk": row["name_uk"],
@@ -138,6 +161,13 @@ def export_web_json(skip_tests: bool = False) -> None:
             "wiki_uk": _clean_url(row["wiki_uk"]),
             "wiki_ru": _clean_url(row["wiki_ru"]),
             "remarkability": round(float(row["remarkability"]), 2),
+            "origin_type": origin_type,
+            "born_in_ukraine": born_in_ua,
+            "ukrainian_nationality_or_heritage": ua_heritage,
+            "provenance_tags": list(row.get("provenance_tags") or []),
+            "birth_year": row.get("birth_year"),
+            "death_year": row.get("death_year"),
+            "authority_links": authority_links,
         }
 
         # 3. search_index locations entry
