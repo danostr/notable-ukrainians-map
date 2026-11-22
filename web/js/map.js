@@ -2,9 +2,9 @@
  * ============================================================================
  * map.js — Leaflet Map, Tile Theme Switcher & Worker Bridge
  * ----------------------------------------------------------------------------
- * Manages the Leaflet map instance, switches CARTO basemap tiles natively for
- * Light/Dark mode, filters `state.allPeople` by active topic/zone, and syncs
- * visible markers with `js/worker.js`.
+ * Manages the Leaflet map instance, filters `state.allPeople` by active
+ * topic, zone, and origin provenance, and syncs visible markers with
+ * `js/worker.js`.
  * ============================================================================
  */
 
@@ -48,7 +48,7 @@ export const markersLayer = L.featureGroup().addTo(map);
 
 /**
  * Kept as a hook for main.js; Dark Mode tile styling is handled via CSS
- * on `.leaflet-tile-pane` in `css/base.css` so only one tile set is needed.
+ * on `.leaflet-tile` in `css/base.css` so only one tile set is needed.
  */
 export function setMapTheme() { }
 
@@ -93,12 +93,14 @@ function askWorker(type, payload) {
 // ============================================================================
 
 /**
- * Filters `state.allPeople` by active Main Category, Sub-Category, and Zone,
- * loads the matching GeoJSON points into the Web Worker, and paints the screen.
+ * Filters `state.allPeople` by active Main Category, Sub-Category, Zone, and
+ * Origin Provenance, loads matching GeoJSON points into the Web Worker, and
+ * paints the screen.
  */
 export async function renderMarkers() {
-    const mainTopic = document.getElementById('topic-filter').value || 'all';
-    const subTopic = document.getElementById('sub-topic-filter').value || 'All';
+    const mainTopic = document.getElementById('topic-filter')?.value || 'all';
+    const subTopic = document.getElementById('sub-topic-filter')?.value || 'All';
+    const originFilter = document.getElementById('origin-filter')?.value || 'all';
     const geoJsonData = [];
 
     for (const person of state.allPeople) {
@@ -123,6 +125,14 @@ export async function renderMarkers() {
                 }
             }
             if (!inZone) continue;
+        }
+
+        // 3. Origin Provenance Filter (Born in Ukraine vs. Diaspora/Nationals Abroad)
+        if (originFilter !== 'all') {
+            const details = state.peopleDetails[person.id];
+            const personOrigin = details?.origin_type
+                || (person.geoTree?.[0] === 'Ukraine' ? 'born_in_ukraine' : 'ukrainian_nationality_or_heritage');
+            if (personOrigin !== originFilter) continue;
         }
 
         geoJsonData.push({
