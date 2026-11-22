@@ -5,7 +5,8 @@
 Queries the Wikidata Query Service (WDQS) in chronological slices across four
 explicit provenance channels so every person has verifiable origin metadata:
   1. `born`         : P19 (birthplace) located inside modern Ukraine (Q212)
-  2. `citizen`      : P27 (citizenship) = Ukraine (Q212)
+  2. `citizen`      : P27 (citizenship) = Ukraine (Q212) or historical/Soviet
+                      Ukrainian states (Q133356 UkrSSR, Q243610 UPR, Q457167 WUPR)
   3. `heritage`     : P172 (ethnic group) = Ukrainians (Q44806)
   4. `encyclopedia` : Listed in Encyclopedia of Modern Ukraine (P4613) or
                       Internet Encyclopedia of Ukraine (P9070)
@@ -36,10 +37,11 @@ PARQUET_OUT = PROCESSED_DIR / "01_raw_people.parquet"
 
 WDQS_ENDPOINT = "https://query.wikidata.org/sparql"
 USER_AGENT = (
-    "NotableUkrainiansMap/1.1 (https://github.com/danostr/notable-ukrainians-map; "
+    "NotableUkrainiansMap/1.2 (https://github.com/danostr/notable-ukrainians-map; "
     "educational historical geography project)"
 )
 
+SCHEMA_VERSION = 2
 ALL_SOURCES: tuple[str, ...] = ("born", "citizen", "heritage", "encyclopedia")
 
 WKT_POINT_RE = re.compile(
@@ -54,105 +56,133 @@ INVALID_JSON_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
 class QuerySlice:
     label: str
     date_filter: str
+    start_year: int | None = None
+    end_year: int | None = None
+
+
+def _make_year_slice(start_year: int, end_year: int) -> QuerySlice:
+    return QuerySlice(
+        label=f"{start_year}_{end_year}",
+        date_filter=(
+            f'FILTER(?birth_date >= "{start_year}-01-01T00:00:00Z"^^xsd:dateTime && '
+            f'?birth_date < "{end_year + 1}-01-01T00:00:00Z"^^xsd:dateTime)'
+        ),
+        start_year=start_year,
+        end_year=end_year,
+    )
 
 
 def build_query_slices() -> list[QuerySlice]:
-    """Partitions human records by P569 birth date so WDQS never times out."""
+    """Partitions human records by P569 birth date so WDQS executes quickly."""
     slices: list[QuerySlice] = [
         QuerySlice(
-            label="pre_1800",
-            date_filter='FILTER(?birth_date < "1800-01-01T00:00:00Z"^^xsd:dateTime)',
+            label="pre_1700",
+            date_filter='FILTER(?birth_date < "1700-01-01T00:00:00Z"^^xsd:dateTime)',
         )
     ]
 
     ranges = [
+        (1700, 1799),
         (1800, 1849),
-        (1850, 1879),
-        (1880, 1899),
-        (1900, 1919),
-        (1920, 1939),
-        (1940, 1959),
-        (1960, 1979),
-        (1980, 1994),
-        (1995, 2030),
+        (1850, 1869),
+        (1870, 1879),
+        *[(y, y + 4) for y in range(1880, 2000, 5)],
+        (2000, 2026),
     ]
     for start_year, end_year in ranges:
-        slices.append(
-            QuerySlice(
-                label=f"{start_year}_{end_year}",
-                date_filter=(
-                    f'FILTER(?birth_date >= "{start_year}-01-01T00:00:00Z"^^xsd:dateTime && '
-                    f'?birth_date < "{end_year + 1}-01-01T00:00:00Z"^^xsd:dateTime)'
-                ),
-            )
-        )
+        slices.append(_make_year_slice(start_year, end_year))
 
     slices.append(
         QuerySlice(
             label="no_birthdate",
-            date_filter="FILTER(!BOUND(?birth_date))",
+            date_filter="FILTER NOT EXISTS { ?person wdt:P569 ?any_birth_date . }",
         )
     )
     return slices
 
 
 def build_sparql_query(query_slice: QuerySlice, source: str) -> str:
-    """Builds a parameterized SPARQL query for one time slice and provenance source."""
+    """
+    Builds a Blazegraph-optimized SPARQL query using a named `%base` subquery
+    to prevent Cartesian multiplication across optional labels and occupations.
+    """
+    is_no_birthdate = query_slice.label == "no_birthdate"
+
+    if is_no_birthdate:
+        base_select_vars = "?person ?birthplace ?coord ?sitelinks"
+        date_clause = f"    {query_slice.date_filter}"
+    else:
+        base_select_vars = "?person ?birthplace ?coord ?birth_date ?sitelinks"
+        date_clause = (
+            f"    ?person wdt:P569 ?birth_date .\n    {query_slice.date_filter}"
+        )
+
     if source == "born":
-        cohort_clause = """
-  ?person wdt:P31 wd:Q5 .
-  ?person wdt:P19 ?birthplace .
-  ?birthplace wdt:P131* wd:Q212 .
+        base_body = f"""
+    ?birthplace wdt:P131* wd:Q212 ;
+                wdt:P625 ?coord .
+    ?person wdt:P19 ?birthplace ;
+            wdt:P31 wd:Q5 ;
+            wikibase:sitelinks ?sitelinks .
+    FILTER(?sitelinks >= 1)
+{date_clause}
 """
     elif source == "citizen":
-        cohort_clause = """
-  ?person wdt:P31 wd:Q5 .
-  ?person wdt:P27 wd:Q212 .
-  OPTIONAL { ?person wdt:P19 ?birthplace . }
+        base_body = f"""
+    VALUES ?country {{ wd:Q212 wd:Q133356 wd:Q243610 wd:Q457167 }}
+    ?person wdt:P27 ?country ;
+            wdt:P31 wd:Q5 ;
+            wikibase:sitelinks ?sitelinks .
+    FILTER(?sitelinks >= 1)
+{date_clause}
+    OPTIONAL {{
+      ?person wdt:P19 ?birthplace .
+      ?birthplace wdt:P625 ?coord .
+    }}
 """
     elif source == "heritage":
-        cohort_clause = """
-  ?person wdt:P31 wd:Q5 .
-  ?person wdt:P172 wd:Q44806 .
-  OPTIONAL { ?person wdt:P19 ?birthplace . }
+        base_body = f"""
+    ?person wdt:P172 wd:Q44806 ;
+            wdt:P31 wd:Q5 ;
+            wikibase:sitelinks ?sitelinks .
+    FILTER(?sitelinks >= 1)
+{date_clause}
+    OPTIONAL {{
+      ?person wdt:P19 ?birthplace .
+      ?birthplace wdt:P625 ?coord .
+    }}
 """
     elif source == "encyclopedia":
-        cohort_clause = """
-  { ?person wdt:P4613 ?esu_anchor . }
-  UNION
-  { ?person wdt:P9070 ?ieu_anchor . }
-  ?person wdt:P31 wd:Q5 .
-  OPTIONAL { ?person wdt:P19 ?birthplace . }
+        base_body = f"""
+    {{ ?person wdt:P4613 ?esu_anchor . }}
+    UNION
+    {{ ?person wdt:P9070 ?ieu_anchor . }}
+    ?person wdt:P31 wd:Q5 ;
+            wikibase:sitelinks ?sitelinks .
+    FILTER(?sitelinks >= 1)
+{date_clause}
+    OPTIONAL {{
+      ?person wdt:P19 ?birthplace .
+      ?birthplace wdt:P625 ?coord .
+    }}
 """
     else:
         raise ValueError(f"Unknown query source: {source!r}")
-
-    if query_slice.label == "no_birthdate":
-        date_clause = f"""
-  OPTIONAL {{ ?person wdt:P569 ?birth_date . }}
-  {query_slice.date_filter}
-"""
-    else:
-        date_clause = f"""
-  ?person wdt:P569 ?birth_date .
-  {query_slice.date_filter}
-"""
 
     return f"""
 SELECT DISTINCT
   ?person ?name_en ?name_uk ?name_ru
   ?image ?wiki_en ?wiki_uk ?wiki_ru
-  ?birthplace ?birthplace_en ?birthplace_uk ?birthplace_ru ?coord
-  ?occupation ?occupation_en ?sitelinks
-  ?birth_date ?death_date
-  ?esu_id ?ieu_id ?viaf_id
+  ?birthplace ?birthplace_en ?birthplace_uk ?birthplace_ru
+  ?coord ?occupation ?occupation_en ?sitelinks
+  ?birth_date ?death_date ?esu_id ?ieu_id ?viaf_id
+WITH {{
+  SELECT DISTINCT {base_select_vars} WHERE {{
+{base_body.rstrip()}
+  }}
+}} AS %base
 WHERE {{
-{cohort_clause}
-{date_clause}
-
-  # Require at least one Wikipedia sitelink to exclude empty stub items
-  ?person wikibase:sitelinks ?sitelinks .
-  FILTER(?sitelinks >= 1)
+  INCLUDE %base
 
   OPTIONAL {{ ?person rdfs:label ?name_en . FILTER(LANG(?name_en) = "en") }}
   OPTIONAL {{ ?person rdfs:label ?name_uk . FILTER(LANG(?name_uk) = "uk") }}
@@ -178,10 +208,13 @@ WHERE {{
   }}
 
   OPTIONAL {{
-    ?birthplace wdt:P625 ?coord .
-    OPTIONAL {{ ?birthplace rdfs:label ?birthplace_en . FILTER(LANG(?birthplace_en) = "en") }}
-    OPTIONAL {{ ?birthplace rdfs:label ?birthplace_uk . FILTER(LANG(?birthplace_uk) = "uk") }}
-    OPTIONAL {{ ?birthplace rdfs:label ?birthplace_ru . FILTER(LANG(?birthplace_ru) = "ru") }}
+    ?birthplace rdfs:label ?birthplace_en . FILTER(LANG(?birthplace_en) = "en")
+  }}
+  OPTIONAL {{
+    ?birthplace rdfs:label ?birthplace_uk . FILTER(LANG(?birthplace_uk) = "uk")
+  }}
+  OPTIONAL {{
+    ?birthplace rdfs:label ?birthplace_ru . FILTER(LANG(?birthplace_ru) = "ru")
   }}
 
   OPTIONAL {{
@@ -246,7 +279,7 @@ def fetch_slice_with_retries(
     client: httpx.Client,
     sparql: str,
     slice_name: str,
-    max_retries: int = 5,
+    max_retries: int = 3,
 ) -> dict[str, Any]:
     """Executes a SPARQL query with exponential backoff for 429/502/503/504 errors."""
     backoff = 4.0
@@ -276,7 +309,7 @@ def fetch_slice_with_retries(
                     f"(attempt {attempt}/{max_retries}) — sleeping {wait_seconds:.1f}s..."
                 )
                 time.sleep(wait_seconds)
-                backoff = min(backoff * 2.0, 60.0)
+                backoff = min(backoff * 2.0, 30.0)
                 continue
 
             response.raise_for_status()
@@ -290,21 +323,94 @@ def fetch_slice_with_retries(
                 f"(attempt {attempt}/{max_retries}) — sleeping {backoff:.1f}s..."
             )
             time.sleep(backoff)
-            backoff = min(backoff * 2.0, 60.0)
+            backoff = min(backoff * 2.0, 30.0)
 
     raise RuntimeError(f"Exhausted retries for slice {slice_name}")
 
 
+def _is_valid_cached_slice(slice_file: Path) -> bool:
+    """Checks that a cached slice exists, is non-empty, and matches SCHEMA_VERSION."""
+    if not slice_file.is_file() or slice_file.stat().st_size == 0:
+        return False
+    try:
+        payload = orjson.loads(slice_file.read_bytes())
+        return payload.get("_meta", {}).get("schema_version") == SCHEMA_VERSION
+    except Exception:
+        return False
+
+
+def _fetch_and_save_slice(
+    client: httpx.Client,
+    q_slice: QuerySlice,
+    source: str,
+    tag: str,
+    refresh: bool,
+) -> None:
+    """Fetches a slice (auto-bisecting year ranges on WDQS timeout) and writes JSON."""
+    slice_file = RAW_DIR / f"slice_{q_slice.label}_{source}.json"
+
+    if not refresh and _is_valid_cached_slice(slice_file):
+        print(f"  [skip] {tag} — cached (v{SCHEMA_VERSION})")
+        return
+
+    print(f"  [fetch] {tag}...")
+    sparql = build_sparql_query(q_slice, source)
+    can_split = (
+        q_slice.start_year is not None
+        and q_slice.end_year is not None
+        and q_slice.start_year < q_slice.end_year
+    )
+
+    try:
+        data = fetch_slice_with_retries(
+            client,
+            sparql,
+            tag,
+            max_retries=2 if can_split else 5,
+        )
+    except RuntimeError:
+        if not can_split:
+            raise
+        assert q_slice.start_year is not None and q_slice.end_year is not None
+        mid = (q_slice.start_year + q_slice.end_year) // 2
+        left = _make_year_slice(q_slice.start_year, mid)
+        right = _make_year_slice(mid + 1, q_slice.end_year)
+        print(
+            f"  [split] {tag} timed out; bisecting into {left.label} & {right.label}..."
+        )
+        # Remove stale parent file if present so consolidate_raw_slices won't double-read
+        if slice_file.exists():
+            slice_file.unlink()
+        _fetch_and_save_slice(client, left, source, f"{tag} -> {left.label}", refresh)
+        _fetch_and_save_slice(client, right, source, f"{tag} -> {right.label}", refresh)
+        return
+
+    bindings_count = len(data.get("results", {}).get("bindings", []))
+    data["_meta"] = {
+        "schema_version": SCHEMA_VERSION,
+        "slice_label": q_slice.label,
+        "source_query": source,
+        "bindings_count": bindings_count,
+    }
+    slice_file.write_bytes(orjson.dumps(data))
+    print(f"  [ok]    {tag} -> {bindings_count:,} raw bindings saved")
+    time.sleep(1.2)
+
+
 def consolidate_raw_slices(raw_dir: Path, parquet_out: Path) -> pl.DataFrame:
-    """Parses all cached `slice_*.json` files into a typed Polars DataFrame."""
+    """Parses all v2 cached `slice_*.json` files into a typed Polars DataFrame."""
     slice_files = sorted(raw_dir.glob("slice_*.json"))
     if not slice_files:
         raise FileNotFoundError(f"No slice_*.json files found in {raw_dir}")
 
     rows: list[dict[str, Any]] = []
+    used_files = 0
     for path in slice_files:
         payload = orjson.loads(path.read_bytes())
         meta = payload.get("_meta", {})
+        if meta.get("schema_version") != SCHEMA_VERSION:
+            continue
+        used_files += 1
         slice_label = meta.get("slice_label", path.stem)
         source_query = meta.get("source_query", "unknown")
         bindings = payload.get("results", {}).get("bindings", [])
@@ -348,6 +454,12 @@ def consolidate_raw_slices(raw_dir: Path, parquet_out: Path) -> pl.DataFrame:
                     "slice_label": slice_label,
                 }
             )
+
+    if used_files == 0:
+        raise RuntimeError(
+            f"Found slice_*.json files in {raw_dir}, but none matched schema_version={SCHEMA_VERSION}. "
+            "Run `python etl/01_extract.py` to fetch updated slices."
+        )
 
     schema = {
         "qid": pl.String,
@@ -404,25 +516,8 @@ def run_extraction(
             for source in active_sources:
                 for q_slice in slices:
                     completed += 1
-                    slice_file = RAW_DIR / f"slice_{q_slice.label}_{source}.json"
                     tag = f"[{completed}/{total_tasks}] {q_slice.label} ({source})"
-
-                    if slice_file.exists() and not refresh:
-                        print(f"  [skip] {tag} — cached")
-                        continue
-
-                    print(f"  [fetch] {tag}...")
-                    sparql = build_sparql_query(q_slice, source)
-                    data = fetch_slice_with_retries(client, sparql, tag)
-                    bindings_count = len(data.get("results", {}).get("bindings", []))
-                    data["_meta"] = {
-                        "slice_label": q_slice.label,
-                        "source_query": source,
-                        "bindings_count": bindings_count,
-                    }
-                    slice_file.write_bytes(orjson.dumps(data))
-                    print(f"  [ok]    {tag} -> {bindings_count:,} raw bindings saved")
-                    time.sleep(1.5)
+                    _fetch_and_save_slice(client, q_slice, source, tag, refresh=refresh)
 
     print("\nConsolidating raw JSON slices into Parquet...")
     df = consolidate_raw_slices(RAW_DIR, PARQUET_OUT)
