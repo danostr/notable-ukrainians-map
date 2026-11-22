@@ -99,8 +99,19 @@ export function generatePopupHTML(basicData) {
         ? `${firstCategory[0]} > ${firstCategory[1]}`
         : firstCategory[0];
 
+    const imageHTML = (typeof details.image === 'string' && details.image.trim())
+        ? `<img
+               src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(details.image.trim())}?width=220"
+               alt="${displayName}"
+               loading="lazy"
+               onerror="this.style.display='none'"
+               style="width: 96px; height: 96px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; display: block;"
+           >`
+        : '';
+
     return `
         <div class="popup-container">
+            ${imageHTML}
             <h3 class="popup-title">${displayName}</h3>
             <div class="popup-body">
                 <p class="popup-detail"><b>Birthplace:</b> ${birthplace}</p>
