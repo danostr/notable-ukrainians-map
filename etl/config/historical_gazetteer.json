@@ -1,0 +1,441 @@
+{
+    "historical_settlements": {
+        "proskuriv": {
+            "qid": "Q156717",
+            "name_en": "Khmelnytskyi",
+            "name_uk": "Хмельницький",
+            "name_ru": "Хмельницкий",
+            "lat": 49.42298,
+            "lon": 26.98713,
+            "ua_region_qid": "Q171331"
+        },
+        "proskurov": {
+            "qid": "Q156717",
+            "name_en": "Khmelnytskyi",
+            "name_uk": "Хмельницький",
+            "name_ru": "Хмельницкий",
+            "lat": 49.42298,
+            "lon": 26.98713,
+            "ua_region_qid": "Q171331"
+        },
+        "stanyslaviv": {
+            "qid": "Q156726",
+            "name_en": "Ivano-Frankivsk",
+            "name_uk": "Івано-Франківськ",
+            "name_ru": "Ивано-Франковск",
+            "lat": 48.92263,
+            "lon": 24.71112,
+            "ua_region_qid": "Q178269"
+        },
+        "stanislawow": {
+            "qid": "Q156726",
+            "name_en": "Ivano-Frankivsk",
+            "name_uk": "Івано-Франківськ",
+            "name_ru": "Ивано-Франковск",
+            "lat": 48.92263,
+            "lon": 24.71112,
+            "ua_region_qid": "Q178269"
+        },
+        "stanislav": {
+            "qid": "Q156726",
+            "name_en": "Ivano-Frankivsk",
+            "name_uk": "Івано-Франківськ",
+            "name_ru": "Ивано-Франковск",
+            "lat": 48.92263,
+            "lon": 24.71112,
+            "ua_region_qid": "Q178269"
+        },
+        "yelysavethrad": {
+            "qid": "Q158292",
+            "name_en": "Kropyvnytskyi",
+            "name_uk": "Кропивницький",
+            "name_ru": "Кропивницкий",
+            "lat": 48.50793,
+            "lon": 32.26232,
+            "ua_region_qid": "Q180981"
+        },
+        "elisavetgrad": {
+            "qid": "Q158292",
+            "name_en": "Kropyvnytskyi",
+            "name_uk": "Кропивницький",
+            "name_ru": "Кропивницкий",
+            "lat": 48.50793,
+            "lon": 32.26232,
+            "ua_region_qid": "Q180981"
+        },
+        "kirovohrad": {
+            "qid": "Q158292",
+            "name_en": "Kropyvnytskyi",
+            "name_uk": "Кропивницький",
+            "name_ru": "Кропивницкий",
+            "lat": 48.50793,
+            "lon": 32.26232,
+            "ua_region_qid": "Q180981"
+        },
+        "kirovograd": {
+            "qid": "Q158292",
+            "name_en": "Kropyvnytskyi",
+            "name_uk": "Кропивницький",
+            "name_ru": "Кропивницкий",
+            "lat": 48.50793,
+            "lon": 32.26232,
+            "ua_region_qid": "Q180981"
+        },
+        "zinovievsk": {
+            "qid": "Q158292",
+            "name_en": "Kropyvnytskyi",
+            "name_uk": "Кропивницький",
+            "name_ru": "Кропивницкий",
+            "lat": 48.50793,
+            "lon": 32.26232,
+            "ua_region_qid": "Q180981"
+        },
+        "katerynoslav": {
+            "qid": "Q48256",
+            "name_en": "Dnipro",
+            "name_uk": "Дніпро",
+            "name_ru": "Днепр",
+            "lat": 48.46472,
+            "lon": 35.04618,
+            "ua_region_qid": "Q170672"
+        },
+        "ekaterinoslav": {
+            "qid": "Q48256",
+            "name_en": "Dnipro",
+            "name_uk": "Дніпро",
+            "name_ru": "Днепр",
+            "lat": 48.46472,
+            "lon": 35.04618,
+            "ua_region_qid": "Q170672"
+        },
+        "dnipropetrovsk": {
+            "qid": "Q48256",
+            "name_en": "Dnipro",
+            "name_uk": "Дніпро",
+            "name_ru": "Днепр",
+            "lat": 48.46472,
+            "lon": 35.04618,
+            "ua_region_qid": "Q170672"
+        },
+        "oleksandrivsk": {
+            "qid": "Q157835",
+            "name_en": "Zaporizhzhia",
+            "name_uk": "Запоріжжя",
+            "name_ru": "Запорожье",
+            "lat": 47.8388,
+            "lon": 35.13957,
+            "ua_region_qid": "Q171334"
+        },
+        "alexandrovsk": {
+            "qid": "Q157835",
+            "name_en": "Zaporizhzhia",
+            "name_uk": "Запоріжжя",
+            "name_ru": "Запорожье",
+            "lat": 47.8388,
+            "lon": 35.13957,
+            "ua_region_qid": "Q171334"
+        },
+        "voroshylovhrad": {
+            "qid": "Q134279",
+            "name_en": "Luhansk",
+            "name_uk": "Луганськ",
+            "name_ru": "Луганск",
+            "lat": 48.57404,
+            "lon": 39.30782,
+            "ua_region_qid": "Q171965"
+        },
+        "voroshilovgrad": {
+            "qid": "Q134279",
+            "name_en": "Luhansk",
+            "name_uk": "Луганськ",
+            "name_ru": "Луганск",
+            "lat": 48.57404,
+            "lon": 39.30782,
+            "ua_region_qid": "Q171965"
+        },
+        "stalino": {
+            "qid": "Q43070",
+            "name_en": "Donetsk",
+            "name_uk": "Донецьк",
+            "name_ru": "Донецк",
+            "lat": 48.01588,
+            "lon": 37.80285,
+            "ua_region_qid": "Q2012050"
+        },
+        "yuzivka": {
+            "qid": "Q43070",
+            "name_en": "Donetsk",
+            "name_uk": "Донецьк",
+            "name_ru": "Донецк",
+            "lat": 48.01588,
+            "lon": 37.80285,
+            "ua_region_qid": "Q2012050"
+        },
+        "artemivsk": {
+            "qid": "Q161987",
+            "name_en": "Bakhmut",
+            "name_uk": "Бахмут",
+            "name_ru": "Бахмут",
+            "lat": 48.59867,
+            "lon": 37.99804,
+            "ua_region_qid": "Q2012050"
+        },
+        "lemberg": {
+            "qid": "Q36036",
+            "name_en": "Lviv",
+            "name_uk": "Львів",
+            "name_ru": "Львов",
+            "lat": 49.84296,
+            "lon": 24.03111,
+            "ua_region_qid": "Q164193"
+        },
+        "lwow": {
+            "qid": "Q36036",
+            "name_en": "Lviv",
+            "name_uk": "Львів",
+            "name_ru": "Львов",
+            "lat": 49.84296,
+            "lon": 24.03111,
+            "ua_region_qid": "Q164193"
+        },
+        "lwów": {
+            "qid": "Q36036",
+            "name_en": "Lviv",
+            "name_uk": "Львів",
+            "name_ru": "Львов",
+            "lat": 49.84296,
+            "lon": 24.03111,
+            "ua_region_qid": "Q164193"
+        },
+        "czernowitz": {
+            "qid": "Q157725",
+            "name_en": "Chernivtsi",
+            "name_uk": "Чернівці",
+            "name_ru": "Черновцы",
+            "lat": 48.29168,
+            "lon": 25.93521,
+            "ua_region_qid": "Q168856"
+        },
+        "tarnopol": {
+            "qid": "Q156743",
+            "name_en": "Ternopil",
+            "name_uk": "Тернопіль",
+            "name_ru": "Тернополь",
+            "lat": 49.55352,
+            "lon": 25.59477,
+            "ua_region_qid": "Q173407"
+        },
+        "rowne": {
+            "qid": "Q156739",
+            "name_en": "Rivne",
+            "name_uk": "Рівне",
+            "name_ru": "Ровно",
+            "lat": 50.6199,
+            "lon": 26.25162,
+            "ua_region_qid": "Q174187"
+        },
+        "równe": {
+            "qid": "Q156739",
+            "name_en": "Rivne",
+            "name_uk": "Рівне",
+            "name_ru": "Ровно",
+            "lat": 50.6199,
+            "lon": 26.25162,
+            "ua_region_qid": "Q174187"
+        },
+        "luck": {
+            "qid": "Q7550",
+            "name_en": "Lutsk",
+            "name_uk": "Луцьк",
+            "name_ru": "Луцк",
+            "lat": 50.74723,
+            "lon": 25.32538,
+            "ua_region_qid": "Q167859"
+        },
+        "łuck": {
+            "qid": "Q7550",
+            "name_en": "Lutsk",
+            "name_uk": "Луцьк",
+            "name_ru": "Луцк",
+            "lat": 50.74723,
+            "lon": 25.32538,
+            "ua_region_qid": "Q167859"
+        },
+        "kamieniec podolski": {
+            "qid": "Q156732",
+            "name_en": "Kamianets-Podilskyi",
+            "name_uk": "Кам'янець-Подільський",
+            "name_ru": "Каменец-Подольский",
+            "lat": 48.68333,
+            "lon": 26.58333,
+            "ua_region_qid": "Q171331"
+        },
+        "kamenets-podolsky": {
+            "qid": "Q156732",
+            "name_en": "Kamianets-Podilskyi",
+            "name_uk": "Кам'янець-Подільський",
+            "name_ru": "Каменец-Подольский",
+            "lat": 48.68333,
+            "lon": 26.58333,
+            "ua_region_qid": "Q171331"
+        },
+        "akkerman": {
+            "qid": "Q161977",
+            "name_en": "Bilhorod-Dnistrovskyi",
+            "name_uk": "Білгород-Дністровський",
+            "name_ru": "Белгород-Днестровский",
+            "lat": 46.19722,
+            "lon": 30.34194,
+            "ua_region_qid": "Q171852"
+        },
+        "ungvar": {
+            "qid": "Q156711",
+            "name_en": "Uzhhorod",
+            "name_uk": "Ужгород",
+            "name_ru": "Ужгород",
+            "lat": 48.6208,
+            "lon": 22.28788,
+            "ua_region_qid": "Q170213"
+        },
+        "ungvár": {
+            "qid": "Q156711",
+            "name_en": "Uzhhorod",
+            "name_uk": "Ужгород",
+            "name_ru": "Ужгород",
+            "lat": 48.6208,
+            "lon": 22.28788,
+            "ua_region_qid": "Q170213"
+        },
+        "munkacs": {
+            "qid": "Q146519",
+            "name_en": "Mukachevo",
+            "name_uk": "Мукачево",
+            "name_ru": "Мукачево",
+            "lat": 48.44139,
+            "lon": 22.71778,
+            "ua_region_qid": "Q170213"
+        },
+        "munkács": {
+            "qid": "Q146519",
+            "name_en": "Mukachevo",
+            "name_uk": "Мукачево",
+            "name_ru": "Мукачево",
+            "lat": 48.44139,
+            "lon": 22.71778,
+            "ua_region_qid": "Q170213"
+        },
+        "beregszasz": {
+            "qid": "Q146502",
+            "name_en": "Berehove",
+            "name_uk": "Берегове",
+            "name_ru": "Берегово",
+            "lat": 48.20556,
+            "lon": 22.64417,
+            "ua_region_qid": "Q170213"
+        },
+        "beregszász": {
+            "qid": "Q146502",
+            "name_en": "Berehove",
+            "name_uk": "Берегове",
+            "name_ru": "Берегово",
+            "lat": 48.20556,
+            "lon": 22.64417,
+            "ua_region_qid": "Q170213"
+        },
+        "pereiaslav-khmelnytskyi": {
+            "qid": "Q161992",
+            "name_en": "Pereiaslav",
+            "name_uk": "Переяслав",
+            "name_ru": "Переяслав",
+            "lat": 50.0725,
+            "lon": 31.44222,
+            "ua_region_qid": "Q170036"
+        },
+        "novohrad-volynskyi": {
+            "qid": "Q161985",
+            "name_en": "Zviahel",
+            "name_uk": "Звягель",
+            "name_ru": "Звягель",
+            "lat": 50.58333,
+            "lon": 27.61667,
+            "ua_region_qid": "Q40637"
+        },
+        "kuznetsovsk": {
+            "qid": "Q161996",
+            "name_en": "Varash",
+            "name_uk": "Вараш",
+            "name_ru": "Вараш",
+            "lat": 51.34444,
+            "lon": 25.85083,
+            "ua_region_qid": "Q174187"
+        },
+        "illichivsk": {
+            "qid": "Q161981",
+            "name_en": "Chornomorsk",
+            "name_uk": "Чорноморськ",
+            "name_ru": "Черноморск",
+            "lat": 46.30167,
+            "lon": 30.65694,
+            "ua_region_qid": "Q171852"
+        },
+        "dzerzhynsk": {
+            "qid": "Q162004",
+            "name_en": "Toretsk",
+            "name_uk": "Торецьк",
+            "name_ru": "Торецк",
+            "lat": 48.39167,
+            "lon": 37.87333,
+            "ua_region_qid": "Q2012050"
+        },
+        "krasnoarmiisk": {
+            "qid": "Q162008",
+            "name_en": "Pokrovsk",
+            "name_uk": "Покровськ",
+            "name_ru": "Покровск",
+            "lat": 48.28278,
+            "lon": 37.18278,
+            "ua_region_qid": "Q2012050"
+        },
+        "stakhanov": {
+            "qid": "Q162012",
+            "name_en": "Kadiivka",
+            "name_uk": "Кадіївка",
+            "name_ru": "Кадиевка",
+            "lat": 48.56806,
+            "lon": 38.65861,
+            "ua_region_qid": "Q171965"
+        },
+        "sverdlovsk": {
+            "qid": "Q162016",
+            "name_en": "Dovzhansk",
+            "name_uk": "Довжанськ",
+            "name_ru": "Довжанск",
+            "lat": 48.07778,
+            "lon": 39.64722,
+            "ua_region_qid": "Q171965"
+        },
+        "krasnodon": {
+            "qid": "Q162020",
+            "name_en": "Sorokyne",
+            "name_uk": "Сорокине",
+            "name_ru": "Сорокино",
+            "lat": 48.29167,
+            "lon": 39.73333,
+            "ua_region_qid": "Q171965"
+        }
+    },
+    "country_centroid_outliers": [
+        {
+            "qid": "Q212",
+            "lat": 48.3794,
+            "lon": 31.1656,
+            "radius_deg": 0.03
+        },
+        {
+            "qid": "Q212",
+            "lat": 49.0,
+            "lon": 32.0,
+            "radius_deg": 0.03
+        }
+    ]
+}
