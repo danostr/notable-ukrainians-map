@@ -89,10 +89,10 @@ function buildSearchIndexFromMemory() {
         const details = state.peopleDetails[person.id] || {};
         const birthplace = (details.birthplace || '').trim();
         const country = person.geoTree.length > 0
-            ? person.geoTree[person.geoTree.length - 1]
+            ? person.geoTree[0]
             : 'Unknown';
         const region = person.geoTree.length >= 2
-            ? person.geoTree[person.geoTree.length - 2]
+            ? person.geoTree[1]
             : '';
 
         // Reuse existing locKey or synthesize one from rounded coordinates + birthplace
