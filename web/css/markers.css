@@ -1,0 +1,145 @@
+/* ==========================================================================
+   markers.css — Supercluster Bubbles, Pulse Ring & Leaflet Popup Cards
+   --------------------------------------------------------------------------
+   Styles the custom L.divIcon cluster badges generated from worker.js data
+   and the popup card displayed when clicking an individual person marker.
+   ========================================================================== */
+
+/* ==========================================================================
+   1. SUPERCLUSTER BUBBLES (Small < 50, Medium < 500, Large >= 500)
+   Note: Never put `transition: transform` on `.leaflet-marker-icon` itself—
+   Leaflet uses inline `transform: translate3d()` to position markers every
+   frame, so transitioning it makes markers lag behind the map during zoom.
+   ========================================================================== */
+.leaflet-marker-icon.marker-cluster {
+    border-radius: 50%;
+    text-align: center;
+    background-clip: padding-box;
+    user-select: none;
+}
+
+.leaflet-marker-icon.marker-cluster div {
+    width: 34px;
+    height: 34px;
+    margin-top: 3px;
+    margin-left: 3px;
+    border-radius: 50%;
+    line-height: 34px;
+    font-size: 11px;
+    color: #ffffff;
+    font-weight: 700;
+    text-align: center;
+    text-shadow: var(--cluster-text-shadow);
+    transition: transform var(--transition-fast);
+}
+
+.leaflet-marker-icon.marker-cluster:hover div {
+    transform: scale(1.1);
+}
+
+.leaflet-marker-icon.marker-cluster-small {
+    background-color: var(--cluster-small-ring);
+}
+
+.leaflet-marker-icon.marker-cluster-small div {
+    background-color: var(--cluster-small-core);
+}
+
+.leaflet-marker-icon.marker-cluster-medium {
+    background-color: var(--cluster-medium-ring);
+}
+
+.leaflet-marker-icon.marker-cluster-medium div {
+    background-color: var(--cluster-medium-core);
+}
+
+.leaflet-marker-icon.marker-cluster-large {
+    background-color: var(--cluster-large-ring);
+}
+
+.leaflet-marker-icon.marker-cluster-large div {
+    background-color: var(--cluster-large-core);
+}
+
+/* ==========================================================================
+   2. ACTIVE MARKER PULSE ANIMATION
+   Uses CSS variables so one keyframe definition serves both light and dark modes.
+   ========================================================================== */
+@keyframes pulseMarker {
+    0% {
+        box-shadow: 0 0 0 0 var(--pulse-ring-start);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px var(--pulse-ring-end);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 var(--pulse-ring-end);
+    }
+}
+
+.active-pulse {
+    animation: pulseMarker 2s infinite;
+    z-index: var(--z-floating-ui);
+}
+
+/* ==========================================================================
+   3. LEAFLET POPUP CARDS
+   ========================================================================== */
+.leaflet-popup .leaflet-popup-content-wrapper {
+    padding: 0;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    background: var(--bg-surface);
+    color: var(--text-body);
+}
+
+.leaflet-popup .leaflet-popup-tip {
+    background: var(--bg-surface);
+}
+
+.leaflet-popup .leaflet-popup-content {
+    margin: 0;
+    width: 300px;
+}
+
+.popup-container {
+    padding: 0;
+}
+
+.popup-title {
+    background: var(--detail-header-bg);
+    color: var(--detail-header-text);
+    margin: 0;
+    padding: var(--space-md);
+    font-size: 1.2rem;
+    font-weight: 800;
+    border-bottom: 1px solid var(--border-default);
+}
+
+.popup-body {
+    padding: var(--space-md);
+    color: var(--text-body);
+}
+
+.popup-detail {
+    margin: 5px 0;
+    font-size: 0.9em;
+}
+
+.popup-detail b {
+    color: var(--text-primary);
+}
+
+.popup-category {
+    display: inline-block;
+    margin-bottom: var(--space-xs);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: var(--bg-surface-subtle);
+    color: var(--accent-secondary);
+}

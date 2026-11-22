@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notable People of Ukraine</title>
+
+    <!-- Third-party Leaflet map stylesheet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!--
+      Parallel modular stylesheets
+      Order matters: variables -> base layout -> floating UI -> markers -> drawers.
+    -->
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/base.css" />
+    <link rel="stylesheet" href="css/ui.css" />
+    <link rel="stylesheet" href="css/markers.css" />
+    <link rel="stylesheet" href="css/panels.css" />
+</head>
+
+<body>
+
+    <!--
+      LEFT DRAWER: Cluster / Region People List
+      Opens when a user clicks a dense city cluster (expansionZoom > 19)
+      or selects a city/region from the top search bar.
+    -->
+    <aside id="cluster-list-panel" aria-label="Location people list">
+        <div class="panel-header panel-header--stacked">
+            <div class="panel-header__top-row">
+                <h2 id="panel-title">Location Name</h2>
+                <!-- Close behavior is wired in js/main.js via data-close-panel -->
+                <button type="button" class="close-panel" data-close-panel="cluster"
+                    aria-label="Close location panel">&times;</button>
+            </div>
+            <div id="panel-subtitle" class="panel-subtitle">0 People Here</div>
+        </div>
+
+        <!-- In-panel live filter & sort controls (operates on state.currentPanelPeople) -->
+        <div class="panel-controls">
+            <input type="text" id="panel-search" placeholder="Search people here..." autocomplete="off">
+            <select id="panel-sort" aria-label="Sort people">
+                <option value="remarkability" selected>Remarkability</option>
+                <option value="alpha">Alphabetical</option>
+            </select>
+        </div>
+
+        <!-- Paginated list container (renders 50 DOM nodes at a time for performance) -->
+        <div id="list-content"></div>
+    </aside>
+
+    <!--
+      DETAIL DRAWER: Individual Biography Card
+      Slides up when a user clicks a person inside the cluster list or search results.
+    -->
+    <aside id="person-detail-panel" aria-label="Person details">
+        <div class="panel-header">
+            <h2 id="detail-name">Name</h2>
+            <button type="button" class="close-panel" data-close-panel="detail"
+                aria-label="Close detail panel">&times;</button>
+        </div>
+        <div id="detail-content"></div>
+    </aside>
+
+    <!-- FULL-VIEWPORT LEAFLET MAP CANVAS -->
+    <main id="map"></main>
+
+    <!-- FLOATING TOP UI: Global Autocomplete Search (Regions, Cities, People) -->
+    <div id="search-container">
+        <input type="text" id="search-input" placeholder="Search for a person, city, or region..." autocomplete="off">
+        <div id="search-results"></div>
+    </div>
+
+    <!-- FLOATING TOP-RIGHT UI: Theme Switcher & Two-Level Category Filter -->
+    <div id="filter-container">
+        <button type="button" id="theme-toggle">🌙 Switch to Dark Mode</button>
+        <hr class="filter-divider">
+
+        <label for="topic-filter"><b>Main Category:</b></label>
+        <select id="topic-filter"></select>
+
+        <label id="sub-topic-label" for="sub-topic-filter" class="is-hidden"><b>Sub-Category:</b></label>
+        <select id="sub-topic-filter" class="is-hidden"></select>
+    </div>
+
+    <!--
+      SCRIPTS:
+      1. Leaflet global library
+      2. ES Module entry point
+    -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>
