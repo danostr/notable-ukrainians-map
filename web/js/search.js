@@ -253,7 +253,8 @@ export function initSearch() {
                 detailContent.querySelector('.popup-title')?.remove();
                 document.getElementById('person-detail-panel').classList.add('open');
 
-                map.flyTo([personData.lat, personData.lon], map.getMaxZoom(), {
+                const targetZoom = Math.min(Math.max(map.getZoom(), 12), 13);
+                map.flyTo([personData.lat, personData.lon], targetZoom, {
                     paddingTopLeft: getFlyToPadding({ includeDetailPanel: true }),
                     duration: 1.0
                 });
