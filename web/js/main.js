@@ -3,8 +3,9 @@
  * main.js — ES Module Entry Point & UI Event Orchestrator
  * ----------------------------------------------------------------------------
  * Bootstraps the application using a two-stage progressive loading strategy
- * and binds global UI event listeners (category dropdowns, dark mode toggle,
- * Escape key handler, panel close buttons, and debounced panel search).
+ * and binds global UI event listeners (category dropdowns, origin filter,
+ * dark mode toggle, Escape key handler, panel close buttons, and debounced
+ * panel search).
  * ============================================================================
  */
 
@@ -23,6 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const mainFilter = document.getElementById('topic-filter');
     const subFilter = document.getElementById('sub-topic-filter');
     const subLabel = document.getElementById('sub-topic-label');
+    const originFilter = document.getElementById('origin-filter');
 
     // ========================================================================
     // TWO-STAGE PROGRESSIVE DATA BOOTSTRAP
@@ -38,12 +40,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Stage 2: Background fetch for detailed popups & autocomplete search
         await loadBackgroundData();
         initSearch();
+
+        // Re-apply origin filter once `state.peopleDetails` finishes loading
+        if (originFilter && originFilter.value !== 'all') {
+            await renderMarkers();
+        }
     } catch (err) {
         console.error('Application startup error:', err);
     }
 
     // ========================================================================
-    // TWO-LEVEL CATEGORY FILTER CONTROLS
+    // TWO-LEVEL CATEGORY & ORIGIN FILTER CONTROLS
     // ========================================================================
     mainFilter.addEventListener('change', e => {
         const selectedMain = e.target.value;
@@ -82,8 +89,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     subFilter.addEventListener('change', () => renderMarkers());
 
+    if (originFilter) {
+        originFilter.addEventListener('change', () => renderMarkers());
+    }
+
     // ========================================================================
-    // THEME TOGGLE (Swaps both CSS tokens and CARTO basemap tiles)
+    // THEME TOGGLE (Swaps both CSS tokens and basemap tiles)
     // ========================================================================
     const themeToggle = document.getElementById('theme-toggle');
     if (themeToggle) {
