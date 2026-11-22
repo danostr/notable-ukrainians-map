@@ -21,7 +21,8 @@
             "Q18844224": "science fiction writer",
             "Q822146": "lyricist / writer",
             "Q5758653": "writer (literary)",
-            "Q9352089": "non-fiction writer"
+            "Q9352089": "non-fiction writer",
+            "Q6430706": "translator of Adam Mickiewicz"
         },
         "Music": {
             "Q36834": "composer",
@@ -44,7 +45,10 @@
             "Q8359428": "singer (feminine)",
             "Q14915627": "music educator",
             "Q2330480": "composer (feminine)",
-            "Q24716636": "opera singer (feminine)"
+            "Q24716636": "opera singer (feminine)",
+            "Q1643514": "conductor (variant)",
+            "Q1162163": "composer (variant)",
+            "Q128124": "audio engineer"
         },
         "Visual Arts": {
             "Q1028181": "painter",
@@ -62,7 +66,12 @@
             "Q3391743": "visual artist",
             "Q7541856": "ceramist",
             "Q6138343": "wood carver",
-            "Q15472169": "patron of the arts"
+            "Q15472169": "patron of the arts",
+            "Q4164507": "painter (variant)",
+            "Q1509440": "fashion designer",
+            "Q245068": "impressionist",
+            "Q10732476": "painter (feminine)",
+            "Q3501317": "fashion designer (variant)"
         },
         "Cinema & Theater": {
             "Q33999": "actor",
@@ -86,13 +95,21 @@
             "Q1208175": "camera operator",
             "Q2707485": "scenographer",
             "Q2449921": "drama teacher",
-            "Q1076502": "theater actor"
+            "Q1076502": "theater actor",
+            "Q10379007": "actor (variant)",
+            "Q2962070": "scenographer (variant)",
+            "Q1414443": "director",
+            "Q1415090": "film actor (feminine)",
+            "Q1235146": "documentary filmmaker"
         },
         "Architecture": {
             "Q42973": "architect",
             "Q131062": "urban planner",
             "Q1184266": "landscape architect",
-            "Q15442776": "restorer"
+            "Q15442776": "restorer",
+            "Q2145981": "restorer (variant)",
+            "Q1340643": "master builder",
+            "Q13582652": "architect (variant)"
         }
     },
     "Politics & Law": {
@@ -119,7 +136,8 @@
             "Q16707842": "official",
             "Q19340487": "politician (feminine)",
             "Q4461829": "statesman / politician",
-            "Q8246794": "foreign minister"
+            "Q8246794": "foreign minister",
+            "Q838811": "politician (variant)"
         },
         "Activists & Dissidents": {
             "Q15253558": "activist",
@@ -133,7 +151,9 @@
             "Q1021386": "suffragist",
             "Q28532974": "public figure",
             "Q1198887": "social activist",
-            "Q3455803": "public figure (feminine)"
+            "Q3455803": "public figure (feminine)",
+            "Q1500610": "community leader",
+            "Q181043": "human rights defender"
         },
         "Law & Judiciary": {
             "Q40348": "lawyer",
@@ -145,7 +165,8 @@
             "Q142885": "solicitor",
             "Q16947677": "legal scholar",
             "Q1595570": "jurist (feminine)",
-            "Q462390": "jurist / legal expert"
+            "Q462390": "jurist / legal expert",
+            "Q384593": "police officer"
         }
     },
     "Science & Academia": {
@@ -171,7 +192,12 @@
             "Q15855449": "metallurgist",
             "Q16742096": "mineralogist",
             "Q18576582": "engineer (feminine)",
-            "Q18524075": "mining engineer"
+            "Q18524075": "mining engineer",
+            "Q3400985": "head of laboratory",
+            "Q1906857": "metallurgist (variant)",
+            "Q2055046": "chemist (variant)",
+            "Q5197818": "design engineer",
+            "Q19350898": "theoretical physicist"
         },
         "Humanities & History": {
             "Q201788": "historian",
@@ -203,7 +229,13 @@
             "Q635734": "archivist (feminine)",
             "Q101084010": "art historian (feminine)",
             "Q2251335": "philologist (feminine)",
-            "Q19829999": "cultural studies scholar"
+            "Q19829999": "cultural studies scholar",
+            "Q10333969": "art historian (variant)",
+            "Q1731155": "philatelist",
+            "Q47090899": "historian (variant)",
+            "Q2675537": "musicologist (variant)",
+            "Q14972848": "ethnographer (variant)",
+            "Q3332711": "medievalist"
         },
         "Medicine & Biology": {
             "Q39631": "physician",
@@ -227,7 +259,9 @@
             "Q2468725": "oncologist",
             "Q15924224": "nurse",
             "Q1781198": "agricultural biologist",
-            "Q3055126": "immunologist (feminine)"
+            "Q3055126": "immunologist (feminine)",
+            "Q211346": "physician (variant)",
+            "Q15839134": "botanist (feminine)"
         },
         "Education": {
             "Q37226": "teacher",
@@ -238,7 +272,9 @@
             "Q212071": "rector",
             "Q15980158": "docent",
             "Q1650915": "researcher",
-            "Q6051619": "teacher (feminine)"
+            "Q6051619": "teacher (feminine)",
+            "Q4220878": "pedagogue (variant)",
+            "Q50359779": "teacher (variant)"
         }
     },
     "Military": {
@@ -263,7 +299,11 @@
             "Q10862974": "sniper",
             "Q2135538": "sailor",
             "Q1397808": "resistance fighter",
-            "Q1250916": "warrior"
+            "Q1250916": "warrior",
+            "Q212948": "military personnel (variant)",
+            "Q1779650": "military personnel (historical)",
+            "Q1377734": "Chernobyl liquidator",
+            "Q730242": "test pilot"
         }
     },
     "Sports": {
@@ -321,7 +361,11 @@
             "Q13382355": "synchronized swimmer",
             "Q13381762": "trampoline gymnast",
             "Q13219587": "figure skater (feminine)",
-            "Q16029547": "biathlete (feminine)"
+            "Q16029547": "biathlete (feminine)",
+            "Q5137576": "ice hockey player (variant)",
+            "Q13381376": "athlete (variant)",
+            "Q24037210": "rhythmic gymnast (feminine)",
+            "Q17361147": "ice dancer"
         },
         "Chess & Other": {
             "Q10873124": "chess player",
@@ -354,7 +398,9 @@
             "Q103163": "abbot",
             "Q2259532": "cleric",
             "Q1569495": "metropolitan bishop",
-            "Q45722": "cardinal"
+            "Q45722": "cardinal",
+            "Q60232542": "archbishop (variant)",
+            "Q1288557": "archimandrite"
         }
     },
     "Business & Media": {
@@ -372,7 +418,9 @@
             "Q13365117": "opinion journalist",
             "Q15958642": "blogger",
             "Q28532973": "sports commentator",
-            "Q16267607": "editing staff"
+            "Q16267607": "editing staff",
+            "Q17337766": "journalist (feminine)",
+            "Q589298": "journalist (variant)"
         },
         "Entrepreneurs & Industry": {
             "Q131524": "entrepreneur",
@@ -387,7 +435,9 @@
             "Q2014833": "investor",
             "Q20631656": "business executive",
             "Q820037": "miner",
-            "Q25272184": "kolkhoznik"
+            "Q25272184": "kolkhoznik",
+            "Q1934482": "milkmaid",
+            "Q3243461": "entrepreneur (feminine)"
         }
     }
 }
