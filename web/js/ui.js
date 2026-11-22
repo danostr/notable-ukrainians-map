@@ -3,8 +3,9 @@
  * ui.js — DOM Rendering, Localization, XSS Escaping & Side Panel Pagination
  * ----------------------------------------------------------------------------
  * Responsible for building safe HTML cards, selecting English vs. Cyrillic
- * names based on user input, calculating responsive map camera offsets, and
- * paginating large location lists in 50-item DOM chunks.
+ * names based on user input, hydrating portraits from Wikidata/Wikipedia,
+ * rendering origin provenance badges & authority links, calculating responsive
+ * map camera offsets, and paginating large location lists in 50-item chunks.
  * ============================================================================
  */
 
@@ -25,8 +26,8 @@ export function escapeHTML(value) {
 }
 
 /**
- * Ensures external Wikipedia URLs use safe http/https schemes before rendering
- * inside <a href="...">.
+ * Ensures external Wikipedia / encyclopedia URLs use safe http/https schemes
+ * before rendering inside <a href="...">.
  */
 function sanitizeWikiUrl(url) {
     if (typeof url !== 'string') return null;
@@ -65,6 +66,15 @@ export function getLocalizedName(details, query, fallback = 'Unknown Name') {
     return details.name_en || details.name_uk || details.name_ru || fallback;
 }
 
+function formatLifespan(details) {
+    const birth = details?.birth_year;
+    const death = details?.death_year;
+    if (birth == null && death == null) return '';
+    if (birth != null && death != null) return `${birth}–${death}`;
+    if (birth != null) return `b. ${birth}`;
+    return `d. ${death}`;
+}
+
 /**
  * Generates the biography card HTML used both inside Leaflet map popups and
  * inside `#person-detail-panel`.
@@ -75,14 +85,17 @@ export function generatePopupHTML(basicData) {
         return `<div class="popup-container"><p class="popup-body">Loading details...</p></div>`;
     }
 
-    const wikiLinks = [
+    const authLinks = details.authority_links || {};
+    const externalLinks = [
         { url: sanitizeWikiUrl(details.wiki_en), cls: 'btn-en', label: 'EN' },
         { url: sanitizeWikiUrl(details.wiki_uk), cls: 'btn-uk', label: 'UA' },
-        { url: sanitizeWikiUrl(details.wiki_ru), cls: 'btn-ru', label: 'RU' }
+        { url: sanitizeWikiUrl(details.wiki_ru), cls: 'btn-ru', label: 'RU' },
+        { url: sanitizeWikiUrl(authLinks.esu), cls: 'btn-uk', label: 'ЕСУ' },
+        { url: sanitizeWikiUrl(authLinks.ieu), cls: 'btn-en', label: 'IEU' }
     ].filter(item => item.url);
 
-    const wikiButtonsHTML = wikiLinks.length > 0
-        ? `<div class="wiki-button-container">${wikiLinks.map(w => `<a href="${w.url}" target="_blank" rel="noopener noreferrer" class="wiki-btn ${w.cls}">${w.label}</a>`).join('')}</div>`
+    const wikiButtonsHTML = externalLinks.length > 0
+        ? `<div class="wiki-button-container">${externalLinks.map(w => `<a href="${w.url}" target="_blank" rel="noopener noreferrer" class="wiki-btn ${w.cls}">${w.label}</a>`).join('')}</div>`
         : '';
 
     const occupationsHTML = (Array.isArray(details.occupations) && details.occupations.length > 0)
@@ -92,6 +105,10 @@ export function generatePopupHTML(basicData) {
     const rawName = details.name_en || details.name_uk || details.name_ru || 'Unknown Name';
     const displayName = escapeHTML(rawName);
     const birthplace = escapeHTML(details.birthplace || 'Unknown');
+    const lifespanText = formatLifespan(details);
+    const lifespanHTML = lifespanText
+        ? `<p class="popup-detail"><b>Years:</b> ${escapeHTML(lifespanText)}</p>`
+        : '';
 
     const firstCategory = (Array.isArray(basicData.categories) && basicData.categories.length > 0)
         ? basicData.categories[0]
@@ -99,6 +116,12 @@ export function generatePopupHTML(basicData) {
     const categoryText = firstCategory[1] && firstCategory[1] !== 'Unknown'
         ? `${firstCategory[0]} > ${firstCategory[1]}`
         : firstCategory[0];
+
+    const originBadgeHTML = details.origin_type === 'ukrainian_nationality_or_heritage'
+        ? `<span class="popup-category" style="margin-left: 4px;">🌍 Diaspora / National</span>`
+        : (details.origin_type === 'born_in_ukraine'
+            ? `<span class="popup-category" style="margin-left: 4px;">🇺🇦 Born in Ukraine</span>`
+            : '');
 
     const initials = escapeHTML(getInitials(rawName));
     const portraitSrc = buildPortraitSrc(details.image);
@@ -128,7 +151,11 @@ export function generatePopupHTML(basicData) {
                 <div class="popup-header__info">
                     <h3 class="popup-title">${displayName}</h3>
                     <p class="popup-detail"><b>Birthplace:</b> ${birthplace}</p>
-                    <div><span class="popup-category">${escapeHTML(categoryText)}</span></div>
+                    ${lifespanHTML}
+                    <div>
+                        <span class="popup-category">${escapeHTML(categoryText)}</span>
+                        ${originBadgeHTML}
+                    </div>
                 </div>
             </div>
             <div class="popup-body">
