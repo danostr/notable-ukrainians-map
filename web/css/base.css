@@ -72,13 +72,21 @@ body.dark-mode .leaflet-tile {
 }
 
 /* ============================================================================
-   BIOGRAPHICAL PORTRAITS & MONOGRAM FALLBACKS
+   BIOGRAPHICAL PORTRAITS, POPUP HEADER & MONOGRAM FALLBACKS
    ============================================================================ */
 .popup-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
-    margin-bottom: 10px;
+    margin: 0;
+    padding: 14px 30px 12px 14px;
+    background: rgba(241, 245, 249, 0.8);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+body.dark-mode .popup-header {
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom-color: rgba(148, 163, 184, 0.18);
 }
 
 .popup-header__info {
@@ -86,19 +94,50 @@ body.dark-mode .leaflet-tile {
     flex: 1;
 }
 
+/* Strip standalone banner box from .popup-title when inside .popup-header */
 .popup-header .popup-title {
-    margin-top: 0;
+    margin: 0 0 5px 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    font-size: 1.02rem;
+    line-height: 1.25;
+}
+
+.popup-header .popup-detail {
+    margin: 0 0 6px 0;
+    font-size: 0.85rem;
+}
+
+.popup-container .popup-body {
+    padding: 10px 14px 12px;
+}
+
+.popup-container .wiki-button-container {
+    margin-top: 8px;
+}
+
+/* Detail Drawer Overrides (title is already in #detail-name) */
+#person-detail-panel .popup-header {
+    align-items: flex-start;
+    padding: 0 0 12px 0;
+    background: transparent;
+}
+
+#person-detail-panel .popup-body {
+    padding: 10px 0 0;
 }
 
 .portrait-frame {
     position: relative;
     flex-shrink: 0;
     width: 64px;
-    height: 64px;
-    border-radius: 10px;
+    height: 72px;
+    border-radius: 8px;
     overflow: hidden;
     background: linear-gradient(135deg, rgba(30, 64, 175, 0.12), rgba(59, 130, 246, 0.22));
     border: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -109,12 +148,11 @@ body.dark-mode .portrait-frame {
     border-color: rgba(148, 163, 184, 0.25);
 }
 
-/* Automatically enlarge portrait inside the slide-over detail drawer */
 #person-detail-panel .portrait-frame {
-    width: 112px;
-    height: 124px;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    width: 104px;
+    height: 118px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
 }
 
 .portrait-initials {
@@ -140,7 +178,6 @@ body.dark-mode .portrait-initials {
     height: 100%;
     object-fit: cover;
     object-position: center 18%;
-    /* Keeps faces/heads centered instead of cropped */
     opacity: 0;
     transition: opacity 0.22s ease-in-out;
 }
