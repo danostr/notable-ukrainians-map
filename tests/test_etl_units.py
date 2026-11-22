@@ -125,7 +125,7 @@ def test_load_taxonomy_rejects_duplicate_qids(tmp_path: Path):
             }
         )
     )
-    with pytest.raises(ValueError, match="Duplicate occupation Q-ID"):
+    with pytest.raises(TypeError, match="Duplicate occupation Q-ID"):
         cat_mod.load_taxonomy_df(bad_config)
 
 
@@ -289,12 +289,14 @@ def test_full_etl_pipeline_offline_end_to_end(
     assert df01.height == 6
 
     # Stage 02: Deduplicate, sanitize, and build trilingual GeoTrees -> 02_clean_people.parquet
+    monkeypatch.setattr(clean_mod, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(clean_mod, "PARQUET_IN", p01)
     monkeypatch.setattr(clean_mod, "PARQUET_OUT", p02)
     monkeypatch.setattr(clean_mod, "PLACES_CACHE", places_cache)
     clean_mod.run_clean_geocode(refresh_places=False)
 
     # Stage 03: Categorize & compute remarkability -> 03_categorized.parquet
+    monkeypatch.setattr(cat_mod, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(cat_mod, "PARQUET_IN", p02)
     monkeypatch.setattr(cat_mod, "PARQUET_OUT", p03)
     cat_mod.run_categorize()
