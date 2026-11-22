@@ -1,35 +1,26 @@
 """
 ===============================================================================
-01_extract.py — Resumable, Partitioned Wikidata SPARQL Extractor
+01_extract.py — Resumable, Time-Sliced Wikidata SPARQL Extractor (T3 + T12)
 -------------------------------------------------------------------------------
-Fetches notable humans (wd:Q5) who either:
-  1. Were born in Ukraine (`wdt:P19 / wdt:P131* wd:Q212`), OR
-  2. Hold Ukrainian citizenship (`wdt:P27 wd:Q212`),
-and possess at least one English, Ukrainian, or Russian Wikipedia article.
+Queries the Wikidata Query Service (WDQS) in chronological slices across four
+explicit provenance channels so every person has verifiable origin metadata:
+  1. `born`         : P19 (birthplace) located inside modern Ukraine (Q212)
+  2. `citizen`      : P27 (citizenship) = Ukraine (Q212)
+  3. `heritage`     : P172 (ethnic group) = Ukrainians (Q44806)
+  4. `encyclopedia` : Listed in Encyclopedia of Modern Ukraine (P4613) or
+                      Internet Encyclopedia of Ukraine (P9070)
 
-Architecture Highlights:
-  - Query Partitioning: Splits queries into birth-year (P569) slices and
-    separates `born` vs. `citizen` patterns so each SPARQL request completes
-    well under Wikidata's 60-second execution timeout.
-  - Checkpointing: Writes raw SPARQL JSON responses to `etl/raw/` immediately
-    after each slice completes; re-running skips existing non-empty slices
-    unless `--force` is specified.
-  - Rate-Limit Compliance: Sends a descriptive Wikimedia User-Agent, pauses
-    between requests, and respects `Retry-After` headers with exponential
-    backoff on HTTP 429 / 503 / 504 responses.
-  - Parquet Consolidation: Normalizes Q-IDs, WKT `Point(lon lat)` coordinates,
-    and Commons filenames into `etl/processed/01_raw_people.parquet`.
+Also extracts P569 (birth date), P570 (death date), and secondary authority
+identifiers (P4613 ЕСУ, P9070 IEU, P214 VIAF).
 ===============================================================================
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -43,90 +34,55 @@ RAW_DIR = PROJECT_ROOT / "etl" / "raw"
 PROCESSED_DIR = PROJECT_ROOT / "etl" / "processed"
 PARQUET_OUT = PROCESSED_DIR / "01_raw_people.parquet"
 
-SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
+WDQS_ENDPOINT = "https://query.wikidata.org/sparql"
 USER_AGENT = (
-    "UkraineNotablesMapETL/1.0 "
-    "(https://github.com/example/ukr_notables; educational historical map project) "
-    "httpx"
+    "NotableUkrainiansMap/1.1 (https://github.com/danostr/notable-ukrainians-map; "
+    "educational historical geography project)"
 )
 
-# Regex for Wikidata WKT coordinate literals: "Point(30.5236 50.45)" -> (lon, lat)
+ALL_SOURCES: tuple[str, ...] = ("born", "citizen", "heritage", "encyclopedia")
+
 WKT_POINT_RE = re.compile(
-    r"^Point\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)$",
+    r"Point\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)",
     re.IGNORECASE,
 )
 
-PARQUET_SCHEMA = pl.Schema(
-    {
-        "qid": pl.String,
-        "source_query": pl.String,
-        "slice_label": pl.String,
-        "name_en": pl.String,
-        "name_uk": pl.String,
-        "name_ru": pl.String,
-        "image": pl.String,
-        "wiki_en": pl.String,
-        "wiki_uk": pl.String,
-        "wiki_ru": pl.String,
-        "birthplace_qid": pl.String,
-        "birthplace_en": pl.String,
-        "birthplace_uk": pl.String,
-        "lat": pl.Float64,
-        "lon": pl.Float64,
-        "occupation_qid": pl.String,
-        "occupation_en": pl.String,
-        "sitelinks_count": pl.Int64,
-    }
-)
+INVALID_JSON_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
 
 
 @dataclass(frozen=True)
 class QuerySlice:
-    """Represents one deterministic birth-date partition for SPARQL querying."""
-
     label: str
-    sparql_filter: str
+    date_filter: str
 
 
 def build_query_slices() -> list[QuerySlice]:
-    """Generates deterministic birth-year slices from pre-1800 through today."""
-    current_year = datetime.now(UTC).year
+    """Partitions human records by P569 birth date so WDQS never times out."""
     slices: list[QuerySlice] = [
         QuerySlice(
             label="pre_1800",
-            sparql_filter=(
-                "?person wdt:P569 ?birthDate .\n"
-                '  FILTER(?birthDate < "1800-01-01T00:00:00Z"^^xsd:dateTime)'
-            ),
-        ),
-        QuerySlice(
-            label="1800_1849",
-            sparql_filter=(
-                "?person wdt:P569 ?birthDate .\n"
-                '  FILTER(?birthDate >= "1800-01-01T00:00:00Z"^^xsd:dateTime && '
-                '?birthDate < "1850-01-01T00:00:00Z"^^xsd:dateTime)'
-            ),
-        ),
-        QuerySlice(
-            label="1850_1899",
-            sparql_filter=(
-                "?person wdt:P569 ?birthDate .\n"
-                '  FILTER(?birthDate >= "1850-01-01T00:00:00Z"^^xsd:dateTime && '
-                '?birthDate < "1900-01-01T00:00:00Z"^^xsd:dateTime)'
-            ),
-        ),
+            date_filter='FILTER(?birth_date < "1800-01-01T00:00:00Z"^^xsd:dateTime)',
+        )
     ]
 
-    # 5-year intervals from 1900 to present keep dense 20th-century slices fast
-    for start_year in range(1900, current_year + 1, 5):
-        end_year = min(start_year + 5, current_year + 1)
+    ranges = [
+        (1800, 1849),
+        (1850, 1879),
+        (1880, 1899),
+        (1900, 1919),
+        (1920, 1939),
+        (1940, 1959),
+        (1960, 1979),
+        (1980, 1994),
+        (1995, 2030),
+    ]
+    for start_year, end_year in ranges:
         slices.append(
             QuerySlice(
-                label=f"{start_year}_{end_year - 1}",
-                sparql_filter=(
-                    "?person wdt:P569 ?birthDate .\n"
-                    f'  FILTER(?birthDate >= "{start_year}-01-01T00:00:00Z"^^xsd:dateTime && '
-                    f'?birthDate < "{end_year}-01-01T00:00:00Z"^^xsd:dateTime)'
+                label=f"{start_year}_{end_year}",
+                date_filter=(
+                    f'FILTER(?birth_date >= "{start_year}-01-01T00:00:00Z"^^xsd:dateTime && '
+                    f'?birth_date < "{end_year + 1}-01-01T00:00:00Z"^^xsd:dateTime)'
                 ),
             )
         )
@@ -134,37 +90,79 @@ def build_query_slices() -> list[QuerySlice]:
     slices.append(
         QuerySlice(
             label="no_birthdate",
-            sparql_filter="FILTER NOT EXISTS { ?person wdt:P569 ?birthDate }",
+            date_filter="FILTER(!BOUND(?birth_date))",
         )
     )
     return slices
 
 
-def build_sparql_query(query_slice: QuerySlice, source_type: str) -> str:
-    """Constructs a SPARQL query for either `born` or `citizen` within a date slice."""
-    if source_type == "born":
-        core_pattern = "?person wdt:P19 / wdt:P131* wd:Q212 ."
-    elif source_type == "citizen":
-        core_pattern = "?person wdt:P27 wd:Q212 ."
+def build_sparql_query(query_slice: QuerySlice, source: str) -> str:
+    """Builds a parameterized SPARQL query for one time slice and provenance source."""
+    if source == "born":
+        cohort_clause = """
+  ?person wdt:P31 wd:Q5 .
+  ?person wdt:P19 ?birthplace .
+  ?birthplace wdt:P131* wd:Q212 .
+"""
+    elif source == "citizen":
+        cohort_clause = """
+  ?person wdt:P31 wd:Q5 .
+  ?person wdt:P27 wd:Q212 .
+  OPTIONAL { ?person wdt:P19 ?birthplace . }
+"""
+    elif source == "heritage":
+        cohort_clause = """
+  ?person wdt:P31 wd:Q5 .
+  ?person wdt:P172 wd:Q44806 .
+  OPTIONAL { ?person wdt:P19 ?birthplace . }
+"""
+    elif source == "encyclopedia":
+        cohort_clause = """
+  { ?person wdt:P4613 ?esu_anchor . }
+  UNION
+  { ?person wdt:P9070 ?ieu_anchor . }
+  ?person wdt:P31 wd:Q5 .
+  OPTIONAL { ?person wdt:P19 ?birthplace . }
+"""
     else:
-        raise ValueError(f"Unsupported source_type: {source_type!r}")
+        raise ValueError(f"Unknown query source: {source!r}")
+
+    if query_slice.label == "no_birthdate":
+        date_clause = f"""
+  OPTIONAL {{ ?person wdt:P569 ?birth_date . }}
+  {query_slice.date_filter}
+"""
+    else:
+        date_clause = f"""
+  ?person wdt:P569 ?birth_date .
+  {query_slice.date_filter}
+"""
 
     return f"""
 SELECT DISTINCT
-  ?person
-  ?name_en ?name_uk ?name_ru
-  ?image
-  ?wiki_en ?wiki_uk ?wiki_ru
-  ?birthplace ?birthplace_en ?birthplace_uk
-  ?coord
-  ?occupation ?occupation_en
-  ?sitelinks
+  ?person ?name_en ?name_uk ?name_ru
+  ?image ?wiki_en ?wiki_uk ?wiki_ru
+  ?birthplace ?birthplace_en ?birthplace_uk ?birthplace_ru ?coord
+  ?occupation ?occupation_en ?sitelinks
+  ?birth_date ?death_date
+  ?esu_id ?ieu_id ?viaf_id
 WHERE {{
-  ?person wdt:P31 wd:Q5 .
-  {core_pattern}
+{cohort_clause}
+{date_clause}
+
+  # Require at least one Wikipedia sitelink to exclude empty stub items
   ?person wikibase:sitelinks ?sitelinks .
   FILTER(?sitelinks >= 1)
-  {query_slice.sparql_filter}
+
+  OPTIONAL {{ ?person rdfs:label ?name_en . FILTER(LANG(?name_en) = "en") }}
+  OPTIONAL {{ ?person rdfs:label ?name_uk . FILTER(LANG(?name_uk) = "uk") }}
+  OPTIONAL {{ ?person rdfs:label ?name_ru . FILTER(LANG(?name_ru) = "ru") }}
+
+  OPTIONAL {{ ?person wdt:P18 ?image . }}
+  OPTIONAL {{ ?person wdt:P570 ?death_date . }}
+  OPTIONAL {{ ?person wdt:P4613 ?esu_id . }}
+  OPTIONAL {{ ?person wdt:P9070 ?ieu_id . }}
+  OPTIONAL {{ ?person wdt:P214 ?viaf_id . }}
 
   OPTIONAL {{
     ?wiki_en schema:about ?person ;
@@ -178,18 +176,12 @@ WHERE {{
     ?wiki_ru schema:about ?person ;
              schema:isPartOf <https://ru.wikipedia.org/> .
   }}
-  FILTER(BOUND(?wiki_en) || BOUND(?wiki_uk) || BOUND(?wiki_ru))
-
-  OPTIONAL {{ ?person rdfs:label ?name_en . FILTER(LANG(?name_en) = "en") }}
-  OPTIONAL {{ ?person rdfs:label ?name_uk . FILTER(LANG(?name_uk) = "uk") }}
-  OPTIONAL {{ ?person rdfs:label ?name_ru . FILTER(LANG(?name_ru) = "ru") }}
-  OPTIONAL {{ ?person wdt:P18 ?image . }}
 
   OPTIONAL {{
-    ?person wdt:P19 ?birthplace .
+    ?birthplace wdt:P625 ?coord .
     OPTIONAL {{ ?birthplace rdfs:label ?birthplace_en . FILTER(LANG(?birthplace_en) = "en") }}
     OPTIONAL {{ ?birthplace rdfs:label ?birthplace_uk . FILTER(LANG(?birthplace_uk) = "uk") }}
-    OPTIONAL {{ ?birthplace wdt:P625 ?coord . }}
+    OPTIONAL {{ ?birthplace rdfs:label ?birthplace_ru . FILTER(LANG(?birthplace_ru) = "ru") }}
   }}
 
   OPTIONAL {{
@@ -200,89 +192,26 @@ WHERE {{
 """.strip()
 
 
-def _parse_sparql_json(raw_bytes: bytes) -> dict[str, Any]:
-    """Parses SPARQL JSON with orjson first, falling back to non-strict stdlib json
-    when Wikidata emits unescaped control characters inside string literals."""
-    try:
-        return orjson.loads(raw_bytes)
-    except orjson.JSONDecodeError:
-        return json.loads(raw_bytes.decode("utf-8", errors="replace"), strict=False)
-
-
-def execute_sparql_with_retries(
-    client: httpx.Client,
-    sparql: str,
-    max_retries: int = 5,
-) -> dict[str, Any]:
-    """Executes a SPARQL POST query with Retry-After and exponential backoff."""
-    retryable_statuses = {429, 502, 503, 504}
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = client.post(
-                SPARQL_ENDPOINT,
-                data={"query": sparql, "format": "json"},
-            )
-
-            if response.status_code == 200:
-                return _parse_sparql_json(response.content)
-
-            if response.status_code in retryable_statuses and attempt < max_retries:
-                retry_after = response.headers.get("Retry-After")
-                wait_seconds = (
-                    float(retry_after)
-                    if retry_after and retry_after.isdigit()
-                    else min(60.0, 2.0**attempt)
-                )
-                print(
-                    f"  [HTTP {response.status_code}] Throttled/busy. "
-                    f"Retrying in {wait_seconds:.1f}s (attempt {attempt}/{max_retries})..."
-                )
-                time.sleep(wait_seconds)
-                continue
-
-            response.raise_for_status()
-
-        except (
-            httpx.TimeoutException,
-            httpx.TransportError,
-            json.JSONDecodeError,
-        ) as exc:
-            if attempt >= max_retries:
-                raise
-            wait_seconds = min(60.0, 2.0**attempt)
-            print(
-                f"  [Transient {type(exc).__name__}] Retrying in {wait_seconds:.1f}s "
-                f"(attempt {attempt}/{max_retries})..."
-            )
-            time.sleep(wait_seconds)
-
-    raise RuntimeError("Exceeded maximum SPARQL retries")
-
-
-def _extract_qid(uri: str | None) -> str | None:
-    """Converts 'http://www.wikidata.org/entity/Q134958' -> 'Q134958'."""
+def _qid_from_uri(uri: str | None) -> str | None:
     if not uri:
         return None
-    tail = uri.rsplit("/", 1)[-1]
-    return tail if tail.startswith("Q") and tail[1:].isdigit() else None
+    return uri.rsplit("/", 1)[-1]
 
 
-def _extract_image_filename(uri: str | None) -> str | None:
-    """Converts Commons Special:FilePath URI into a clean decoded filename."""
-    if not uri:
+def _extract_image_filename(image_uri: str | None) -> str | None:
+    if not image_uri:
         return None
-    filename = unquote(uri.rsplit("/", 1)[-1]).strip()
-    if filename.startswith("File:"):
-        filename = filename[5:].strip()
-    return filename or None
+    raw = image_uri.rsplit("/", 1)[-1]
+    if raw.startswith("File:"):
+        raw = raw[5:]
+    decoded = unquote(raw).strip()
+    return decoded or None
 
 
 def _parse_wkt_point(wkt: str | None) -> tuple[float | None, float | None]:
-    """Parses Wikidata WKT 'Point(lon lat)' into (lat, lon) float tuple."""
     if not wkt:
         return None, None
-    match = WKT_POINT_RE.match(wkt.strip())
+    match = WKT_POINT_RE.search(wkt)
     if not match:
         return None, None
     lon = float(match.group(1))
@@ -290,152 +219,239 @@ def _parse_wkt_point(wkt: str | None) -> tuple[float | None, float | None]:
     return lat, lon
 
 
-def _binding_value(binding: dict[str, Any], key: str) -> str | None:
-    """Safely extracts string value from a SPARQL JSON binding cell."""
+def _binding_val(binding: dict[str, Any], key: str) -> str | None:
     cell = binding.get(key)
-    if not isinstance(cell, dict):
+    if not cell:
         return None
     val = cell.get("value")
-    return str(val) if val is not None else None
+    return str(val).strip() if val is not None else None
 
 
-def consolidate_raw_slices(raw_dir: Path, parquet_path: Path) -> pl.DataFrame:
-    """Reads all checkpointed JSON slices and writes `01_raw_people.parquet`."""
+def _parse_sparql_json(raw_bytes: bytes) -> dict[str, Any]:
+    """Parses WDQS JSON even when literals contain stray control chars or escapes."""
+    try:
+        return orjson.loads(raw_bytes)
+    except orjson.JSONDecodeError:
+        import json
+
+        text = raw_bytes.decode("utf-8", errors="replace")
+        try:
+            return json.loads(text, strict=False)
+        except json.JSONDecodeError:
+            sanitized = INVALID_JSON_ESCAPE_RE.sub(r"\\\\", text)
+            return json.loads(sanitized, strict=False)
+
+
+def fetch_slice_with_retries(
+    client: httpx.Client,
+    sparql: str,
+    slice_name: str,
+    max_retries: int = 5,
+) -> dict[str, Any]:
+    """Executes a SPARQL query with exponential backoff for 429/502/503/504 errors."""
+    backoff = 4.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.post(
+                WDQS_ENDPOINT,
+                data={"query": sparql, "format": "json"},
+                headers={
+                    "Accept": "application/sparql-results+json",
+                    "User-Agent": USER_AGENT,
+                },
+                timeout=90.0,
+            )
+            if response.status_code == 200:
+                return _parse_sparql_json(response.content)
+
+            if response.status_code in {429, 502, 503, 504}:
+                retry_after = response.headers.get("Retry-After")
+                wait_seconds = (
+                    float(retry_after)
+                    if retry_after and retry_after.isdigit()
+                    else backoff
+                )
+                print(
+                    f"  [!] HTTP {response.status_code} on {slice_name} "
+                    f"(attempt {attempt}/{max_retries}) — sleeping {wait_seconds:.1f}s..."
+                )
+                time.sleep(wait_seconds)
+                backoff = min(backoff * 2.0, 60.0)
+                continue
+
+            response.raise_for_status()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt == max_retries:
+                raise RuntimeError(
+                    f"Failed slice {slice_name} after {max_retries} attempts"
+                ) from exc
+            print(
+                f"  [!] Network timeout/error on {slice_name} ({exc.__class__.__name__}) "
+                f"(attempt {attempt}/{max_retries}) — sleeping {backoff:.1f}s..."
+            )
+            time.sleep(backoff)
+            backoff = min(backoff * 2.0, 60.0)
+
+    raise RuntimeError(f"Exhausted retries for slice {slice_name}")
+
+
+def consolidate_raw_slices(raw_dir: Path, parquet_out: Path) -> pl.DataFrame:
+    """Parses all cached `slice_*.json` files into a typed Polars DataFrame."""
     slice_files = sorted(raw_dir.glob("slice_*.json"))
     if not slice_files:
         raise FileNotFoundError(f"No slice_*.json files found in {raw_dir}")
 
     rows: list[dict[str, Any]] = []
-
-    for file_path in slice_files:
-        payload = orjson.loads(file_path.read_bytes())
+    for path in slice_files:
+        payload = orjson.loads(path.read_bytes())
         meta = payload.get("_meta", {})
+        slice_label = meta.get("slice_label", path.stem)
         source_query = meta.get("source_query", "unknown")
-        slice_label = meta.get("slice_label", file_path.stem)
-
         bindings = payload.get("results", {}).get("bindings", [])
+
         for b in bindings:
-            qid = _extract_qid(_binding_value(b, "person"))
+            qid = _qid_from_uri(_binding_val(b, "person"))
             if not qid:
                 continue
 
-            lat, lon = _parse_wkt_point(_binding_value(b, "coord"))
-            sitelinks_raw = _binding_value(b, "sitelinks")
+            lat, lon = _parse_wkt_point(_binding_val(b, "coord"))
+            sitelinks_raw = _binding_val(b, "sitelinks")
+            sitelinks = (
+                int(sitelinks_raw) if sitelinks_raw and sitelinks_raw.isdigit() else 0
+            )
 
             rows.append(
                 {
                     "qid": qid,
-                    "source_query": source_query,
-                    "slice_label": slice_label,
-                    "name_en": _binding_value(b, "name_en"),
-                    "name_uk": _binding_value(b, "name_uk"),
-                    "name_ru": _binding_value(b, "name_ru"),
-                    "image": _extract_image_filename(_binding_value(b, "image")),
-                    "wiki_en": _binding_value(b, "wiki_en"),
-                    "wiki_uk": _binding_value(b, "wiki_uk"),
-                    "wiki_ru": _binding_value(b, "wiki_ru"),
-                    "birthplace_qid": _extract_qid(_binding_value(b, "birthplace")),
-                    "birthplace_en": _binding_value(b, "birthplace_en"),
-                    "birthplace_uk": _binding_value(b, "birthplace_uk"),
+                    "name_en": _binding_val(b, "name_en"),
+                    "name_uk": _binding_val(b, "name_uk"),
+                    "name_ru": _binding_val(b, "name_ru"),
+                    "image": _extract_image_filename(_binding_val(b, "image")),
+                    "wiki_en": _binding_val(b, "wiki_en"),
+                    "wiki_uk": _binding_val(b, "wiki_uk"),
+                    "wiki_ru": _binding_val(b, "wiki_ru"),
+                    "birthplace_qid": _qid_from_uri(_binding_val(b, "birthplace")),
+                    "birthplace_en": _binding_val(b, "birthplace_en"),
+                    "birthplace_uk": _binding_val(b, "birthplace_uk"),
+                    "birthplace_ru": _binding_val(b, "birthplace_ru"),
                     "lat": lat,
                     "lon": lon,
-                    "occupation_qid": _extract_qid(_binding_value(b, "occupation")),
-                    "occupation_en": _binding_value(b, "occupation_en"),
-                    "sitelinks_count": int(sitelinks_raw) if sitelinks_raw else 0,
+                    "occupation_qid": _qid_from_uri(_binding_val(b, "occupation")),
+                    "occupation_en": _binding_val(b, "occupation_en"),
+                    "sitelinks_count": sitelinks,
+                    "birth_date": _binding_val(b, "birth_date"),
+                    "death_date": _binding_val(b, "death_date"),
+                    "esu_id": _binding_val(b, "esu_id"),
+                    "ieu_id": _binding_val(b, "ieu_id"),
+                    "viaf_id": _binding_val(b, "viaf_id"),
+                    "source_query": source_query,
+                    "slice_label": slice_label,
                 }
             )
 
-    df = pl.DataFrame(rows, schema=PARQUET_SCHEMA)
-    parquet_path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(parquet_path, compression="zstd")
+    schema = {
+        "qid": pl.String,
+        "name_en": pl.String,
+        "name_uk": pl.String,
+        "name_ru": pl.String,
+        "image": pl.String,
+        "wiki_en": pl.String,
+        "wiki_uk": pl.String,
+        "wiki_ru": pl.String,
+        "birthplace_qid": pl.String,
+        "birthplace_en": pl.String,
+        "birthplace_uk": pl.String,
+        "birthplace_ru": pl.String,
+        "lat": pl.Float64,
+        "lon": pl.Float64,
+        "occupation_qid": pl.String,
+        "occupation_en": pl.String,
+        "sitelinks_count": pl.Int64,
+        "birth_date": pl.String,
+        "death_date": pl.String,
+        "esu_id": pl.String,
+        "ieu_id": pl.String,
+        "viaf_id": pl.String,
+        "source_query": pl.String,
+        "slice_label": pl.String,
+    }
+
+    df = pl.DataFrame(rows, schema=schema)
+    parquet_out.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(parquet_out, compression="zstd")
     return df
 
 
 def run_extraction(
-    force: bool = False,
-    test_slice: bool = False,
-    delay_seconds: float = 1.5,
+    refresh: bool = False,
+    consolidate_only: bool = False,
+    sources: list[str] | None = None,
 ) -> None:
-    """Runs resumable SPARQL extraction across all configured slices."""
+    """Runs incremental slice extraction and consolidates into 01_raw_people.parquet."""
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    active_sources = sources or list(ALL_SOURCES)
+    slices = build_query_slices()
 
-    all_slices = build_query_slices()
-    if test_slice:
-        # 1850_1899 is fast (< 10s) and includes major Ukrainian literary/historical figures
-        all_slices = [s for s in all_slices if s.label == "1850_1899"]
+    if not consolidate_only:
+        total_tasks = len(slices) * len(active_sources)
+        completed = 0
+        print(
+            f"Starting Wikidata SPARQL extraction ({len(slices)} slices × "
+            f"{len(active_sources)} sources [{', '.join(active_sources)}] = {total_tasks} queries)..."
+        )
 
-    tasks = [
-        (query_slice, source_type)
-        for query_slice in all_slices
-        for source_type in ("born", "citizen")
-    ]
+        with httpx.Client(http2=False) as client:
+            for source in active_sources:
+                for q_slice in slices:
+                    completed += 1
+                    slice_file = RAW_DIR / f"slice_{q_slice.label}_{source}.json"
+                    tag = f"[{completed}/{total_tasks}] {q_slice.label} ({source})"
 
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/sparql-results+json",
-    }
+                    if slice_file.exists() and not refresh:
+                        print(f"  [skip] {tag} — cached")
+                        continue
 
-    print(f"Starting Wikidata extraction ({len(tasks)} total query tasks)...")
-
-    with httpx.Client(headers=headers, timeout=90.0) as client:
-        for idx, (query_slice, source_type) in enumerate(tasks, start=1):
-            out_file = RAW_DIR / f"slice_{query_slice.label}_{source_type}.json"
-
-            if not force and out_file.is_file() and out_file.stat().st_size > 0:
-                print(
-                    f"[{idx}/{len(tasks)}] SKIP {out_file.name} (already checkpointed)"
-                )
-                continue
-
-            print(f"[{idx}/{len(tasks)}] FETCH {out_file.name} ...")
-            t0 = time.perf_counter()
-            sparql = build_sparql_query(query_slice, source_type)
-            result = execute_sparql_with_retries(client, sparql)
-
-            # Attach slice provenance metadata alongside raw SPARQL bindings
-            result["_meta"] = {
-                "slice_label": query_slice.label,
-                "source_query": source_type,
-                "fetched_at_utc": datetime.now(UTC).isoformat(),
-            }
-
-            row_count = len(result.get("results", {}).get("bindings", []))
-            out_file.write_bytes(orjson.dumps(result))
-            elapsed = time.perf_counter() - t0
-            print(f"  -> Saved {row_count:,} bindings in {elapsed:.1f}s")
-
-            if idx < len(tasks):
-                time.sleep(delay_seconds)
+                    print(f"  [fetch] {tag}...")
+                    sparql = build_sparql_query(q_slice, source)
+                    data = fetch_slice_with_retries(client, sparql, tag)
+                    bindings_count = len(data.get("results", {}).get("bindings", []))
+                    data["_meta"] = {
+                        "slice_label": q_slice.label,
+                        "source_query": source,
+                        "bindings_count": bindings_count,
+                    }
+                    slice_file.write_bytes(orjson.dumps(data))
+                    print(f"  [ok]    {tag} -> {bindings_count:,} raw bindings saved")
+                    time.sleep(1.5)
 
     print("\nConsolidating raw JSON slices into Parquet...")
     df = consolidate_raw_slices(RAW_DIR, PARQUET_OUT)
-    unique_qids = df.select(pl.col("qid").n_unique()).item()
+    unique_qids = df["qid"].n_unique()
     print(
-        f"Done! Wrote {df.height:,} raw rows ({unique_qids:,} unique Q-IDs) "
-        f"to {PARQUET_OUT.relative_to(PROJECT_ROOT)}"
+        f"Saved {df.height:,} raw bindings ({unique_qids:,} unique Q-IDs) -> {PARQUET_OUT}"
     )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Partitioned, resumable Wikidata SPARQL extractor for Ukraine Notables."
+        description="Extract notable Ukrainians from Wikidata SPARQL."
     )
     parser.add_argument(
-        "--force",
+        "--refresh",
         action="store_true",
-        help="Re-fetch slices even if non-empty checkpoint files exist in etl/raw/.",
+        help="Re-download existing slice_*.json files instead of skipping cached slices.",
     )
     parser.add_argument(
-        "--test-slice",
+        "--consolidate-only",
         action="store_true",
-        help="Run only the 1850_1899 slice (born + citizen) to verify the pipeline quickly.",
+        help="Skip network requests and rebuild 01_raw_people.parquet from cached slices.",
     )
     parser.add_argument(
-        "--delay",
-        type=float,
-        default=1.5,
-        help="Polite pause in seconds between consecutive SPARQL requests (default: 1.5).",
+        "--sources",
+        nargs="+",
+        choices=list(ALL_SOURCES),
+        default=list(ALL_SOURCES),
+        help="Subset of provenance sources to query (default: born citizen heritage encyclopedia).",
     )
     return parser.parse_args()
 
@@ -443,7 +459,7 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     run_extraction(
-        force=args.force,
-        test_slice=args.test_slice,
-        delay_seconds=args.delay,
+        refresh=args.refresh,
+        consolidate_only=args.consolidate_only,
+        sources=args.sources,
     )
