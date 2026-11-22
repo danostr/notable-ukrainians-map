@@ -115,7 +115,6 @@ export function generatePopupHTML(basicData) {
                     src="${escapeHTML(portraitSrc)}"
                     alt="${displayName}"
                     class="portrait-img"
-                    loading="lazy"
                     onload="this.classList.add('is-loaded')"
                     onerror="this.remove()"
                 >` : ''}
@@ -197,7 +196,6 @@ async function hydratePortraitFromWikipedia(personId) {
                             const img = document.createElement('img');
                             img.className = 'portrait-img';
                             img.alt = details.name_en || details.name_uk || 'Portrait';
-                            img.loading = 'lazy';
                             img.onload = () => img.classList.add('is-loaded');
                             img.onerror = () => img.remove();
                             img.src = thumbSrc;
