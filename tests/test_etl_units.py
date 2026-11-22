@@ -6,6 +6,7 @@ Runs completely offline in < 0.2s.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ def _load_etl_module(filename: str, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, ETL_DIR / filename)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = mod
     spec.loader.exec_module(mod)
     return mod
 
