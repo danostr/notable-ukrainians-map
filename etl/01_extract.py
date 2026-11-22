@@ -2,9 +2,10 @@
 ===============================================================================
 01_extract.py — Resumable, Time-Sliced Wikidata SPARQL Extractor (T3 + T12)
 -------------------------------------------------------------------------------
-Queries the Wikidata Query Service (WDQS) in chronological slices across four
-explicit provenance channels so every person has verifiable origin metadata:
-  1. `born`         : P19 (birthplace) located inside modern Ukraine (Q212)
+Queries the Wikidata Query Service (WDQS) across four explicit provenance
+channels so every person has verifiable origin metadata:
+  1. `born`         : P19 (birthplace) located inside modern Ukraine (Q212),
+                      partitioned into chronological slices to avoid timeouts
   2. `citizen`      : P27 (citizenship) = Ukraine (Q212) or historical/Soviet
                       Ukrainian states (Q133356 UkrSSR, Q243610 UPR, Q457167 WUPR)
   3. `heritage`     : P172 (ethnic group) = Ukrainians (Q44806)
@@ -72,8 +73,15 @@ def _make_year_slice(start_year: int, end_year: int) -> QuerySlice:
     )
 
 
-def build_query_slices() -> list[QuerySlice]:
-    """Partitions human records by P569 birth date so WDQS executes quickly."""
+def build_query_slices(source: str = "born") -> list[QuerySlice]:
+    """
+    Partitions `born` records by P569 birth date so WDQS never times out.
+    Smaller cohorts (`citizen`, `heritage`, `encyclopedia`) execute fastest as a
+    single direct index lookup (`all_years`) without scanning P569 date ranges.
+    """
+    if source != "born":
+        return [QuerySlice(label="all_years", date_filter="")]
+
     slices: list[QuerySlice] = [
         QuerySlice(
             label="pre_1700",
@@ -106,16 +114,20 @@ def build_sparql_query(query_slice: QuerySlice, source: str) -> str:
     Builds a Blazegraph-optimized SPARQL query using a named `%base` subquery
     to prevent Cartesian multiplication across optional labels and occupations.
     """
-    is_no_birthdate = query_slice.label == "no_birthdate"
+    is_unsliced = query_slice.label in {"no_birthdate", "all_years"}
 
-    if is_no_birthdate:
+    if is_unsliced:
         base_select_vars = "?person ?birthplace ?coord ?sitelinks"
-        date_clause = f"    {query_slice.date_filter}"
+        date_clause = (
+            f"    {query_slice.date_filter}" if query_slice.date_filter else ""
+        )
+        outer_birth_date = "  OPTIONAL { ?person wdt:P569 ?birth_date . }"
     else:
         base_select_vars = "?person ?birthplace ?coord ?birth_date ?sitelinks"
         date_clause = (
             f"    ?person wdt:P569 ?birth_date .\n    {query_slice.date_filter}"
         )
+        outer_birth_date = ""
 
     if source == "born":
         base_body = f"""
@@ -183,6 +195,7 @@ WITH {{
 }} AS %base
 WHERE {{
   INCLUDE %base
+{outer_birth_date}
 
   OPTIONAL {{ ?person rdfs:label ?name_en . FILTER(LANG(?name_en) = "en") }}
   OPTIONAL {{ ?person rdfs:label ?name_uk . FILTER(LANG(?name_uk) = "uk") }}
@@ -279,9 +292,9 @@ def fetch_slice_with_retries(
     client: httpx.Client,
     sparql: str,
     slice_name: str,
-    max_retries: int = 3,
+    max_retries: int = 4,
 ) -> dict[str, Any]:
-    """Executes a SPARQL query with exponential backoff for 429/502/503/504 errors."""
+    """Executes a SPARQL query with exponential backoff for 429/500/502/503/504 errors."""
     backoff = 4.0
     for attempt in range(1, max_retries + 1):
         try:
@@ -297,7 +310,7 @@ def fetch_slice_with_retries(
             if response.status_code == 200:
                 return _parse_sparql_json(response.content)
 
-            if response.status_code in {429, 502, 503, 504}:
+            if response.status_code in {429, 500, 502, 503, 504}:
                 retry_after = response.headers.get("Retry-After")
                 wait_seconds = (
                     float(retry_after)
@@ -368,7 +381,7 @@ def _fetch_and_save_slice(
             tag,
             max_retries=2 if can_split else 5,
         )
-    except RuntimeError:
+    except (RuntimeError, httpx.HTTPStatusError):
         if not can_split:
             raise
         assert q_slice.start_year is not None and q_slice.end_year is not None
@@ -378,7 +391,6 @@ def _fetch_and_save_slice(
         print(
             f"  [split] {tag} timed out; bisecting into {left.label} & {right.label}..."
         )
-        # Remove stale parent file if present so consolidate_raw_slices won't double-read
         if slice_file.exists():
             slice_file.unlink()
         _fetch_and_save_slice(client, left, source, f"{tag} -> {left.label}", refresh)
@@ -502,22 +514,23 @@ def run_extraction(
     """Runs incremental slice extraction and consolidates into 01_raw_people.parquet."""
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     active_sources = sources or list(ALL_SOURCES)
-    slices = build_query_slices()
 
     if not consolidate_only:
-        total_tasks = len(slices) * len(active_sources)
-        completed = 0
+        tasks: list[tuple[str, QuerySlice]] = [
+            (source, q_slice)
+            for source in active_sources
+            for q_slice in build_query_slices(source)
+        ]
+        total_tasks = len(tasks)
         print(
-            f"Starting Wikidata SPARQL extraction ({len(slices)} slices × "
-            f"{len(active_sources)} sources [{', '.join(active_sources)}] = {total_tasks} queries)..."
+            f"Starting Wikidata SPARQL extraction ({total_tasks} queries across "
+            f"[{', '.join(active_sources)}])..."
         )
 
         with httpx.Client(http2=False) as client:
-            for source in active_sources:
-                for q_slice in slices:
-                    completed += 1
-                    tag = f"[{completed}/{total_tasks}] {q_slice.label} ({source})"
-                    _fetch_and_save_slice(client, q_slice, source, tag, refresh=refresh)
+            for idx, (source, q_slice) in enumerate(tasks, start=1):
+                tag = f"[{idx}/{total_tasks}] {q_slice.label} ({source})"
+                _fetch_and_save_slice(client, q_slice, source, tag, refresh=refresh)
 
     print("\nConsolidating raw JSON slices into Parquet...")
     df = consolidate_raw_slices(RAW_DIR, PARQUET_OUT)
