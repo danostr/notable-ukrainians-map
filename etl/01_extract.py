@@ -92,13 +92,30 @@ def _make_year_slice(start_year: int, end_year: int) -> QuerySlice:
     )
 
 
+def build_fallback_slices() -> list[QuerySlice]:
+    """Fallback chronological slices when an unsliced `all_years` query times out."""
+    return [
+        QuerySlice(
+            label="pre_1850",
+            date_filter='FILTER(?birth_date < "1850-01-01T00:00:00Z"^^xsd:dateTime)',
+        ),
+        _make_year_slice(1850, 1899),
+        _make_year_slice(1900, 1949),
+        _make_year_slice(1950, 1999),
+        _make_year_slice(2000, 2026),
+        QuerySlice(
+            label="no_birthdate",
+            date_filter="FILTER NOT EXISTS { ?person wdt:P569 ?any_birth_date . }",
+        ),
+    ]
+
+
 def build_query_slices(source: str = "born") -> list[QuerySlice]:
     """
-    Partitions `born` records by P569 birth date so WDQS never times out.
-    Smaller cohorts (`citizen`, `heritage`, `encyclopedia`) execute fastest as a
-    single direct index lookup (`all_years`) without scanning P569 date ranges.
+    Partitions `born` and `citizen` records by P569 birth date so WDQS never times out.
+    Smaller cohorts (`heritage`, `encyclopedia`) execute as a single `all_years` lookup.
     """
-    if source != "born":
+    if source not in {"born", "citizen"}:
         return [QuerySlice(label="all_years", date_filter="")]
 
     slices: list[QuerySlice] = [
@@ -303,8 +320,7 @@ def _parse_sparql_json(raw_bytes: bytes) -> dict[str, Any]:
         try:
             return json.loads(text, strict=False)
         except json.JSONDecodeError:
-            # Escape lone backslashes (including trailing backslash before a quote)
-            sanitized = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", text)
+            sanitized = INVALID_JSON_ESCAPE_RE.sub(r"\\\\", text)
             return json.loads(sanitized, strict=False)
 
 
@@ -403,7 +419,8 @@ def _fetch_and_save_slice(
     refresh: bool,
 ) -> tuple[int, bool, float]:
     """
-    Fetches a slice (auto-bisecting year ranges on WDQS timeout) and writes JSON.
+    Fetches a slice (auto-bisecting year ranges or falling back to sub-slices
+    on WDQS timeout) and writes JSON.
     Returns (bindings_count, was_fetched_from_network, elapsed_seconds).
     """
     slice_start = time.perf_counter()
@@ -424,6 +441,7 @@ def _fetch_and_save_slice(
         and q_slice.end_year is not None
         and q_slice.start_year < q_slice.end_year
     )
+    can_fallback_split = q_slice.label == "all_years"
 
     try:
         data, _payload_bytes, _net_elapsed = fetch_slice_with_retries(
@@ -433,30 +451,51 @@ def _fetch_and_save_slice(
             max_retries=2 if can_split else 5,
         )
     except (RuntimeError, httpx.HTTPStatusError):
-        if not can_split:
-            raise
-        assert q_slice.start_year is not None and q_slice.end_year is not None
-        mid = (q_slice.start_year + q_slice.end_year) // 2
-        left = _make_year_slice(q_slice.start_year, mid)
-        right = _make_year_slice(mid + 1, q_slice.end_year)
-        print(
-            f"  [split] {tag} timed out after {_format_duration(time.perf_counter() - slice_start)}; "
-            f"bisecting into {left.label} & {right.label}..."
-        )
-        if slice_file.exists():
-            slice_file.unlink()
-        left_count, _, _ = _fetch_and_save_slice(
-            client, left, source, f"{tag} -> {left.label}", refresh
-        )
-        right_count, _, _ = _fetch_and_save_slice(
-            client, right, source, f"{tag} -> {right.label}", refresh
-        )
-        total_split = left_count + right_count
-        print(
-            f"  [split-ok] {tag} -> combined {total_split:,} bindings "
-            f"in {_format_duration(time.perf_counter() - slice_start)}"
-        )
-        return total_split, True, time.perf_counter() - slice_start
+        if can_split:
+            assert q_slice.start_year is not None and q_slice.end_year is not None
+            mid = (q_slice.start_year + q_slice.end_year) // 2
+            left = _make_year_slice(q_slice.start_year, mid)
+            right = _make_year_slice(mid + 1, q_slice.end_year)
+            print(
+                f"  [split] {tag} timed out after {_format_duration(time.perf_counter() - slice_start)}; "
+                f"bisecting into {left.label} & {right.label}..."
+            )
+            if slice_file.exists():
+                slice_file.unlink()
+            left_count, _, _ = _fetch_and_save_slice(
+                client, left, source, f"{tag} -> {left.label}", refresh
+            )
+            right_count, _, _ = _fetch_and_save_slice(
+                client, right, source, f"{tag} -> {right.label}", refresh
+            )
+            total_split = left_count + right_count
+            print(
+                f"  [split-ok] {tag} -> combined {total_split:,} bindings "
+                f"in {_format_duration(time.perf_counter() - slice_start)}"
+            )
+            return total_split, True, time.perf_counter() - slice_start
+
+        if can_fallback_split:
+            fallback_slices = build_fallback_slices()
+            print(
+                f"  [fallback] {tag} timed out after {_format_duration(time.perf_counter() - slice_start)}; "
+                f"splitting into {len(fallback_slices)} chronological sub-slices..."
+            )
+            if slice_file.exists():
+                slice_file.unlink()
+            total_fallback = 0
+            for sub_slice in fallback_slices:
+                sub_count, _, _ = _fetch_and_save_slice(
+                    client, sub_slice, source, f"{tag} -> {sub_slice.label}", refresh
+                )
+                total_fallback += sub_count
+            print(
+                f"  [fallback-ok] {tag} -> combined {total_fallback:,} bindings "
+                f"in {_format_duration(time.perf_counter() - slice_start)}"
+            )
+            return total_fallback, True, time.perf_counter() - slice_start
+
+        raise
 
     bindings_count = len(data.get("results", {}).get("bindings", []))
     data["_meta"] = {
