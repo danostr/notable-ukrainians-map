@@ -89,7 +89,8 @@ export function generatePopupHTML(basicData) {
         ? `<p class="popup-detail"><b>Occupation:</b> ${escapeHTML(details.occupations.join(', '))}</p>`
         : '';
 
-    const displayName = escapeHTML(details.name_en || details.name_uk || details.name_ru || 'Unknown Name');
+    const rawName = details.name_en || details.name_uk || details.name_ru || 'Unknown Name';
+    const displayName = escapeHTML(rawName);
     const birthplace = escapeHTML(details.birthplace || 'Unknown');
 
     const firstCategory = (Array.isArray(basicData.categories) && basicData.categories.length > 0)
@@ -99,28 +100,116 @@ export function generatePopupHTML(basicData) {
         ? `${firstCategory[0]} > ${firstCategory[1]}`
         : firstCategory[0];
 
-    const imageHTML = (typeof details.image === 'string' && details.image.trim())
-        ? `<img
-               src="https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(details.image.trim())}?width=220"
-               alt="${displayName}"
-               loading="lazy"
-               onerror="this.style.display='none'"
-               style="width: 96px; height: 96px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; display: block;"
-           >`
-        : '';
+    const initials = escapeHTML(getInitials(rawName));
+    const portraitSrc = buildPortraitSrc(details.image);
+
+    if (!portraitSrc) {
+        queueMicrotask(() => hydratePortraitFromWikipedia(basicData.id));
+    }
+
+    const portraitHTML = `
+        <div class="portrait-frame" data-person-id="${escapeHTML(basicData.id)}">
+            <span class="portrait-initials" aria-hidden="true">${initials}</span>
+            ${portraitSrc ? `
+                <img
+                    src="${escapeHTML(portraitSrc)}"
+                    alt="${displayName}"
+                    class="portrait-img"
+                    loading="lazy"
+                    onload="this.classList.add('is-loaded')"
+                    onerror="this.remove()"
+                >` : ''}
+        </div>
+    `;
 
     return `
         <div class="popup-container">
-            ${imageHTML}
-            <h3 class="popup-title">${displayName}</h3>
+            <div class="popup-header">
+                ${portraitHTML}
+                <div class="popup-header__info">
+                    <h3 class="popup-title">${displayName}</h3>
+                    <p class="popup-detail"><b>Birthplace:</b> ${birthplace}</p>
+                    <div><span class="popup-category">${escapeHTML(categoryText)}</span></div>
+                </div>
+            </div>
             <div class="popup-body">
-                <p class="popup-detail"><b>Birthplace:</b> ${birthplace}</p>
-                <div><span class="popup-category">${escapeHTML(categoryText)}</span></div>
                 ${occupationsHTML}
                 ${wikiButtonsHTML}
             </div>
         </div>
     `;
+}
+
+const resolvedWikiThumbs = new Map();
+
+function getInitials(name) {
+    const parts = String(name || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function buildPortraitSrc(rawImage) {
+    if (typeof rawImage !== 'string') return null;
+    const trimmed = rawImage.trim();
+    if (!trimmed) return null;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(trimmed)}?width=260`;
+}
+
+/**
+ * Lazily queries Wikipedia's public REST summary API when Wikidata P18 is missing
+ * and caches the thumbnail URL in `state.peopleDetails[personId].image`.
+ */
+async function hydratePortraitFromWikipedia(personId) {
+    if (resolvedWikiThumbs.has(personId)) return;
+    resolvedWikiThumbs.set(personId, true);
+
+    const details = state.peopleDetails[personId];
+    if (!details) return;
+
+    const candidateUrls = [details.wiki_uk, details.wiki_en, details.wiki_ru].filter(Boolean);
+    for (const wikiUrl of candidateUrls) {
+        try {
+            const parsed = new URL(wikiUrl);
+            const title = parsed.pathname.replace(/^\/wiki\//, '');
+            if (!title) continue;
+
+            const restUrl = `${parsed.origin}/api/rest_v1/page/summary/${title}`;
+            const res = await fetch(restUrl);
+            if (!res.ok) continue;
+
+            const summary = await res.json();
+            const thumbSrc = summary?.thumbnail?.source;
+            if (thumbSrc && /^https:\/\/upload\.wikimedia\.org\//i.test(thumbSrc)) {
+                details.image = thumbSrc;
+                document
+                    .querySelectorAll(`.portrait-frame[data-person-id="${CSS.escape(personId)}"]`)
+                    .forEach(frame => {
+                        const existingImg = frame.querySelector('img');
+                        if (existingImg) {
+                            existingImg.src = thumbSrc;
+                            existingImg.style.display = 'block';
+                        } else {
+                            const img = document.createElement('img');
+                            img.className = 'portrait-img';
+                            img.alt = details.name_en || details.name_uk || 'Portrait';
+                            img.loading = 'lazy';
+                            img.onload = () => img.classList.add('is-loaded');
+                            img.onerror = () => img.remove();
+                            img.src = thumbSrc;
+                            frame.appendChild(img);
+                        }
+                    });
+                return;
+            }
+        } catch {
+            // Ignore network/CORS errors and try next language edition
+        }
+    }
 }
 
 export function closeAllPanels(mapInstance) {
