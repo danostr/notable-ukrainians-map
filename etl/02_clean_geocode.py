@@ -1,29 +1,37 @@
 """
 ===============================================================================
-02_clean_geocode.py — Entity Deduplication, Hygiene & GeoTree Builder
+02_clean_geocode.py — Entity Deduplication, Hygiene & GeoTree Builder (T4 + T12)
 -------------------------------------------------------------------------------
 Transforms `etl/processed/01_raw_people.parquet` into a clean, deduplicated
 one-row-per-person dataset at `etl/processed/02_clean_people.parquet`.
 
 Pipeline Steps:
-  1. Hygiene & Normalization:
+  1. Hygiene, Coordinate Outlier Audit & Historical Gazetteer Normalization:
      - Strips leaked Wikidata Q-ID strings (e.g., "Q1899") appearing as labels.
-     - Validates Earth coordinates and drops null / NaN / (0.0, 0.0) records.
+     - Resolves renamed historical Ukrainian towns via
+       `etl/config/historical_gazetteer.json` before coordinate snapping.
+     - Auto-repairs swapped Ukrainian (lon, lat) pairs, drops (0.0, 0.0) /
+       out-of-bounds coordinates, and rejects generic country-level `Q212`
+       centroids lacking a specific settlement.
      - Drops records lacking any usable name across EN, UK, and RU.
-  2. Deterministic Entity Deduplication (Polars):
+  2. Deterministic Entity Deduplication & Village-Precision Ranking (Polars):
      - Collapses multi-row records per `qid` into unique people with
        deduplicated `occupation_qids` and `occupation_labels` lists.
-     - Deterministically selects one canonical birthplace per person (preferring
-       birthplaces inside Ukraine when multiple P19 claims exist).
+     - Ranks candidate birthplaces so specific villages (`sela`) and towns
+       inside Ukraine beat oblast-level centroids.
+     - Computes explicit provenance flags (`born_in_ukraine`,
+       `ukrainian_nationality_or_heritage`, `origin_type`, `provenance_tags`),
+       lifespan years (`birth_year`, `death_year`), and secondary authority
+       identifiers (`esu_id`, `ieu_id`, `viaf_id`).
   3. Cached Trilingual Administrative Hierarchy (`etl/raw/places_hierarchy.json`):
      - Queries Wikidata in batches of 200 unique `birthplace_qid`s to resolve
        EN / UK / RU labels for the settlement, modern Ukrainian Oblast
        (or foreign Admin-1 region), and country.
      - Maps historical governorates / graph gaps inside Ukraine to the 27
-       modern first-level Ukrainian administrative divisions (24 oblasts,
-       Autonomous Republic of Crimea, Kyiv, and Sevastopol).
+       modern first-level Ukrainian administrative divisions.
      - Snaps people sharing the same `birthplace_qid` to a single canonical
-       `(lat, lon)` coordinate pair and assigns a deterministic `loc_key`.
+       `(lat, lon)` coordinate pair and assigns a `birthplace_qid`-scoped
+       `loc_key` so distinct nearby villages never collide.
 ===============================================================================
 """
 
@@ -44,6 +52,7 @@ import polars as pl
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = PROJECT_ROOT / "etl" / "raw"
 PROCESSED_DIR = PROJECT_ROOT / "etl" / "processed"
+GAZETTEER_PATH = PROJECT_ROOT / "etl" / "config" / "historical_gazetteer.json"
 
 PARQUET_IN = PROCESSED_DIR / "01_raw_people.parquet"
 PARQUET_OUT = PROCESSED_DIR / "02_clean_people.parquet"
@@ -51,13 +60,15 @@ PLACES_CACHE = RAW_DIR / "places_hierarchy.json"
 
 SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
 USER_AGENT = (
-    "UkraineNotablesMapETL/1.0 "
-    "(https://github.com/example/ukr_notables; educational historical map project) "
+    "UkraineNotablesMapETL/1.1 "
+    "(https://github.com/danostr/notable-ukrainians-map; educational historical map project) "
     "httpx"
 )
 
+UKRAINE_QID = "Q212"
 QID_RE = re.compile(r"^Q[1-9]\d*$")
 SLUG_UNSAFE_RE = re.compile(r"[^a-zA-Z0-9]+")
+YEAR_RE = re.compile(r"^([+-]?\d{1,4})")
 
 # Canonical 27 first-level administrative divisions of Ukraine:
 # qid -> (en, uk, ru, approx_lat, approx_lon)
@@ -280,6 +291,13 @@ HISTORICAL_REGION_HINTS: list[tuple[str, str]] = [
 ]
 
 
+def load_gazetteer(path: Path = GAZETTEER_PATH) -> dict[str, Any]:
+    """Loads optional historical settlement & centroid outlier rules."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return {"historical_settlements": {}, "country_centroid_outliers": []}
+    return orjson.loads(path.read_bytes())
+
+
 def _clean_label_expr(col_name: str) -> pl.Expr:
     """Trims whitespace and converts blank strings or leaked Q-IDs into null."""
     trimmed = pl.col(col_name).str.strip_chars()
@@ -291,6 +309,24 @@ def _clean_label_expr(col_name: str) -> pl.Expr:
         .otherwise(trimmed)
         .alias(col_name)
     )
+
+
+def _parse_year(date_str: str | None) -> int | None:
+    """Extracts an integer year (supporting BCE negative years) from ISO date strings."""
+    if not date_str:
+        return None
+    match = YEAR_RE.match(date_str.strip())
+    if not match:
+        return None
+    try:
+        year = int(match.group(1))
+        return year if -3000 <= year <= 2030 else None
+    except ValueError:
+        return None
+
+
+def _in_ukraine_bbox(lat: float, lon: float) -> bool:
+    return 44.0 <= lat <= 52.6 and 22.0 <= lon <= 40.5
 
 
 def _nearest_ukrainian_region(lat: float, lon: float) -> str:
@@ -344,12 +380,13 @@ def _parse_sparql_json(raw_bytes: bytes) -> dict[str, Any]:
 
 
 def _build_place_hierarchy_sparql(place_qids: list[str]) -> str:
-    """Builds a batched SPARQL query resolving EN/UK/RU labels and admin parents."""
+    """Builds a batched SPARQL query resolving EN/UK/RU labels, coords, and admin parents."""
     values_clause = " ".join(f"wd:{qid}" for qid in place_qids)
     return f"""
 SELECT DISTINCT
   ?place
   ?place_en ?place_uk ?place_ru
+  ?coord
   ?country ?country_en ?country_uk ?country_ru
   ?ua_region
   ?admin1 ?admin1_en ?admin1_uk ?admin1_ru
@@ -359,6 +396,7 @@ WHERE {{
   OPTIONAL {{ ?place rdfs:label ?place_en . FILTER(LANG(?place_en) = "en") }}
   OPTIONAL {{ ?place rdfs:label ?place_uk . FILTER(LANG(?place_uk) = "uk") }}
   OPTIONAL {{ ?place rdfs:label ?place_ru . FILTER(LANG(?place_ru) = "ru") }}
+  OPTIONAL {{ ?place wdt:P625 ?coord . }}
 
   OPTIONAL {{
     ?place wdt:P17 ?country .
@@ -504,14 +542,15 @@ def resolve_places_hierarchy(
         lon = float(row["lon"])
         raw_en = row["birthplace_en"]
         raw_uk = row["birthplace_uk"]
+        raw_ru = row.get("birthplace_ru")
 
         entry = cache.get(pq, {}) if pq else {}
         city_en = entry.get("place_en") or raw_en or raw_uk or pq or "Unknown"
         city_uk = entry.get("place_uk") or raw_uk or city_en
-        city_ru = entry.get("place_ru") or city_uk
+        city_ru = entry.get("place_ru") or raw_ru or city_uk
 
         is_ukraine = bool(entry.get("is_ukraine")) or (
-            entry.get("country_qid") == "Q212"
+            entry.get("country_qid") == UKRAINE_QID
         )
         # Geographic bounding-box check for Ukraine when Wikidata P17 is missing
         if (
@@ -554,7 +593,11 @@ def resolve_places_hierarchy(
                 geo_tree = [country_en, reg_en, city_en]
 
         slug = SLUG_UNSAFE_RE.sub("_", city_en).strip("_") or (pq or "loc")
-        loc_key = f"{slug}_{round(lat, 5)}_{round(lon, 5)}"
+        loc_key = (
+            f"{slug}_{pq}_{round(lat, 5)}_{round(lon, 5)}"
+            if pq
+            else f"{slug}_{round(lat, 5)}_{round(lon, 5)}"
+        )
 
         normalized[pq or loc_key] = {
             "birthplace_en": city_en,
@@ -570,6 +613,7 @@ def resolve_places_hierarchy(
             "loc_key": loc_key,
             "lat": round(lat, 5),
             "lon": round(lon, 5),
+            "is_ukraine": is_ukraine,
         }
 
     return normalized
@@ -591,11 +635,11 @@ def _summarize_place_bindings(
         place_ru = place_ru or _binding_val(b, "place_ru")
 
         c_qid = _extract_qid(_binding_val(b, "country"))
-        if c_qid == "Q212":
+        if c_qid == UKRAINE_QID:
             is_ukraine = True
-            country_qid = "Q212"
+            country_qid = UKRAINE_QID
             country_en, country_uk, country_ru = "Ukraine", "Україна", "Украина"
-        elif c_qid and country_qid != "Q212":
+        elif c_qid and country_qid != UKRAINE_QID:
             country_qid = country_qid or c_qid
             country_en = country_en or _binding_val(b, "country_en")
             country_uk = country_uk or _binding_val(b, "country_uk")
@@ -627,6 +671,91 @@ def _summarize_place_bindings(
     }
 
 
+def _apply_gazetteer_and_coord_audit(
+    df: pl.DataFrame,
+    gazetteer: dict[str, Any],
+) -> pl.DataFrame:
+    """
+    Applies historical settlement name/coordinate overrides, unswaps inverted
+    Ukrainian (lon, lat) coordinates, and rejects country-centroid fallbacks.
+    """
+    settlements = gazetteer.get("historical_settlements", {})
+    centroid_outliers = gazetteer.get("country_centroid_outliers", [])
+
+    audited_rows: list[dict[str, Any]] = []
+    for row in df.iter_rows(named=True):
+        bp_qid = row.get("birthplace_qid")
+        bp_en = row.get("birthplace_en")
+        bp_uk = row.get("birthplace_uk")
+        bp_ru = row.get("birthplace_ru")
+        lat = row.get("lat")
+        lon = row.get("lon")
+
+        # 1. Historical gazetteer resolution (e.g., Proskuriv -> Khmelnytskyi)
+        gaz_hit = None
+        for lbl in (bp_en, bp_uk, bp_ru):
+            if lbl and lbl.lower() in settlements:
+                gaz_hit = settlements[lbl.lower()]
+                break
+
+        if gaz_hit:
+            bp_qid = gaz_hit["qid"]
+            bp_en = gaz_hit["name_en"]
+            bp_uk = gaz_hit["name_uk"]
+            bp_ru = gaz_hit["name_ru"]
+            lat = float(gaz_hit["lat"])
+            lon = float(gaz_hit["lon"])
+
+        # 2. Validate coordinates and auto-repair swapped Ukrainian (lon, lat)
+        if (
+            lat is None
+            or lon is None
+            or not (math.isfinite(lat) and math.isfinite(lon))
+        ):
+            continue
+        if (lat == 0.0 and lon == 0.0) or not (
+            -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
+        ):
+            continue
+
+        if (
+            not _in_ukraine_bbox(lat, lon)
+            and _in_ukraine_bbox(lon, lat)
+            and row.get("source_query") == "born"
+        ):
+            lat, lon = lon, lat
+
+        # 3. Reject generic country-centroid fallbacks ("Ukraine" Q212 without a settlement)
+        if bp_qid == UKRAINE_QID:
+            continue
+
+        is_centroid_outlier = False
+        for outlier in centroid_outliers:
+            if bp_qid == outlier.get("qid"):
+                rad = float(outlier.get("radius_deg", 0.03))
+                if (
+                    abs(lat - float(outlier["lat"])) <= rad
+                    and abs(lon - float(outlier["lon"])) <= rad
+                ):
+                    is_centroid_outlier = True
+                    break
+        if is_centroid_outlier:
+            continue
+
+        updated = dict(row)
+        updated["birthplace_qid"] = bp_qid
+        updated["birthplace_en"] = bp_en
+        updated["birthplace_uk"] = bp_uk
+        updated["birthplace_ru"] = bp_ru
+        updated["lat"] = float(lat)
+        updated["lon"] = float(lon)
+        audited_rows.append(updated)
+
+    if not audited_rows:
+        return df.clear()
+    return pl.DataFrame(audited_rows, schema=df.schema)
+
+
 def run_clean_geocode(refresh_places: bool = False) -> None:
     """Executes deduplication, coordinate/label hygiene, and GeoTree normalization."""
     if not PARQUET_IN.is_file():
@@ -635,6 +764,19 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
     raw_df = pl.read_parquet(PARQUET_IN)
     raw_row_count = raw_df.height
     raw_unique_qids = raw_df.select(pl.col("qid").n_unique()).item()
+    gazetteer = load_gazetteer(GAZETTEER_PATH)
+
+    # Ensure backward compatibility when optional T12 columns are absent in older slices
+    for opt_col in (
+        "birthplace_ru",
+        "birth_date",
+        "death_date",
+        "esu_id",
+        "ieu_id",
+        "viaf_id",
+    ):
+        if opt_col not in raw_df.columns:
+            raw_df = raw_df.with_columns(pl.lit(None, dtype=pl.String).alias(opt_col))
 
     # 1. Clean string columns and strip leaked Q-IDs
     text_cols = [
@@ -643,6 +785,7 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
         "name_ru",
         "birthplace_en",
         "birthplace_uk",
+        "birthplace_ru",
         "occupation_en",
     ]
     cleaned = raw_df.with_columns([_clean_label_expr(c) for c in text_cols])
@@ -654,32 +797,36 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
         | pl.col("name_ru").is_not_null()
     )
 
-    # 3. Validate coordinates (finite, within Earth bounds, non-(0.0, 0.0))
-    valid_coords = cleaned.filter(
-        pl.col("lat").is_not_null()
-        & pl.col("lon").is_not_null()
-        & pl.col("lat").is_finite()
-        & pl.col("lon").is_finite()
-        & pl.col("lat").is_between(-90.0, 90.0)
-        & pl.col("lon").is_between(-180.0, 180.0)
-        & ~((pl.col("lat") == 0.0) & (pl.col("lon") == 0.0))
-    )
+    # 3. Apply historical gazetteer & coordinate outlier audit
+    valid_coords = _apply_gazetteer_and_coord_audit(cleaned, gazetteer)
 
     valid_qids_after_coords = valid_coords.select(pl.col("qid").n_unique()).item()
     dropped_no_coords = raw_unique_qids - valid_qids_after_coords
 
-    # 4. Deterministic sorting so `.first()` picks preferred Ukrainian birthplaces
+    # 4. Deterministic sorting so `.first()` picks specific settlements inside Ukraine
+    oblast_qids = list(UKRAINE_REGIONS.keys())
     prioritized = valid_coords.with_columns(
         [
             (pl.col("source_query") == "born").alias("is_born_in_ua"),
+            (
+                pl.col("birthplace_qid").is_not_null()
+                & ~pl.col("birthplace_qid").is_in(oblast_qids)
+                & (pl.col("birthplace_qid") != UKRAINE_QID)
+            ).alias("is_specific_settlement"),
             pl.col("birthplace_qid").is_not_null().alias("has_bp_qid"),
         ]
     ).sort(
-        by=["qid", "is_born_in_ua", "has_bp_qid", "birthplace_qid"],
-        descending=[False, True, True, False],
+        by=[
+            "qid",
+            "is_born_in_ua",
+            "is_specific_settlement",
+            "has_bp_qid",
+            "birthplace_qid",
+        ],
+        descending=[False, True, True, True, False],
     )
 
-    # 5. Deduplicate per `qid` while preserving all occupations & provenance flags
+    # 5. Deduplicate per `qid` while preserving all occupations & provenance evidence
     people_df = prioritized.group_by("qid", maintain_order=True).agg(
         [
             pl.col("name_en").drop_nulls().first().alias("name_en"),
@@ -692,8 +839,14 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
             pl.col("birthplace_qid").first().alias("birthplace_qid"),
             pl.col("birthplace_en").drop_nulls().first().alias("birthplace_en"),
             pl.col("birthplace_uk").drop_nulls().first().alias("birthplace_uk"),
+            pl.col("birthplace_ru").drop_nulls().first().alias("birthplace_ru"),
             pl.col("lat").first().alias("lat"),
             pl.col("lon").first().alias("lon"),
+            pl.col("birth_date").drop_nulls().first().alias("birth_date"),
+            pl.col("death_date").drop_nulls().first().alias("death_date"),
+            pl.col("esu_id").drop_nulls().first().alias("esu_id"),
+            pl.col("ieu_id").drop_nulls().first().alias("ieu_id"),
+            pl.col("viaf_id").drop_nulls().first().alias("viaf_id"),
             pl.col("occupation_qid")
             .drop_nulls()
             .unique()
@@ -705,21 +858,23 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
             .sort()
             .alias("occupation_labels"),
             pl.col("sitelinks_count").max().alias("sitelinks_count"),
-            (pl.col("source_query") == "born").any().alias("born_in_ukraine"),
+            (pl.col("source_query") == "born").any().alias("raw_born_in_ua"),
             (pl.col("source_query") == "citizen").any().alias("ukrainian_citizen"),
+            (pl.col("source_query") == "heritage").any().alias("ukrainian_heritage"),
         ]
     )
 
-    # 6. Snap coordinates per unique `birthplace_qid` so city clusters align cleanly
+    # 6. Snap coordinates per unique `birthplace_qid` so city/village clusters align cleanly
     unique_places = (
         people_df.group_by("birthplace_qid")
         .agg(
             [
                 pl.col("birthplace_en").drop_nulls().first().alias("birthplace_en"),
                 pl.col("birthplace_uk").drop_nulls().first().alias("birthplace_uk"),
+                pl.col("birthplace_ru").drop_nulls().first().alias("birthplace_ru"),
                 pl.col("lat").median().round(5).alias("lat"),
                 pl.col("lon").median().round(5).alias("lon"),
-                pl.col("born_in_ukraine").any().alias("is_born_in_ua"),
+                pl.col("raw_born_in_ua").any().alias("is_born_in_ua"),
             ]
         )
         .sort("birthplace_qid")
@@ -731,7 +886,7 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
         refresh_cache=refresh_places,
     )
 
-    # 7. Attach normalized trilingual geography, snapped coordinates, `loc_key`, and `geo_tree`
+    # 7. Attach normalized trilingual geography, snapped coordinates, and explicit provenance
     enriched_rows: list[dict[str, Any]] = []
     for row in people_df.iter_rows(named=True):
         pq = row["birthplace_qid"]
@@ -741,6 +896,27 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
         fallback_key = f"{fallback_slug}_{round(float(row['lat']), 5)}_{round(float(row['lon']), 5)}"
 
         geo = place_lookup[pq or fallback_key]
+        born_in_ua = geo["country_en"] == "Ukraine"
+        ua_heritage_or_nat = not born_in_ua
+
+        provenance_tags: list[str] = []
+        if born_in_ua:
+            provenance_tags.append("born_in_ukraine")
+        else:
+            provenance_tags.append("born_abroad")
+        if row["ukrainian_citizen"]:
+            provenance_tags.append("citizenship_p27")
+        if row["ukrainian_heritage"]:
+            provenance_tags.append("ethnic_group_p172")
+        if row["esu_id"]:
+            provenance_tags.append("esu_p4613")
+        if row["ieu_id"]:
+            provenance_tags.append("ieu_p9070")
+
+        origin_type = (
+            "born_in_ukraine" if born_in_ua else "ukrainian_nationality_or_heritage"
+        )
+
         enriched_rows.append(
             {
                 "qid": row["qid"],
@@ -768,8 +944,16 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
                 "occupation_qids": row["occupation_qids"],
                 "occupation_labels": row["occupation_labels"],
                 "sitelinks_count": row["sitelinks_count"],
-                "born_in_ukraine": row["born_in_ukraine"],
+                "born_in_ukraine": born_in_ua,
                 "ukrainian_citizen": row["ukrainian_citizen"],
+                "ukrainian_nationality_or_heritage": ua_heritage_or_nat,
+                "origin_type": origin_type,
+                "provenance_tags": provenance_tags,
+                "birth_year": _parse_year(row["birth_date"]),
+                "death_year": _parse_year(row["death_date"]),
+                "esu_id": row["esu_id"],
+                "ieu_id": row["ieu_id"],
+                "viaf_id": row["viaf_id"],
             }
         )
 
@@ -778,16 +962,16 @@ def run_clean_geocode(refresh_places: bool = False) -> None:
     out_df.write_parquet(PARQUET_OUT, compression="zstd")
 
     unique_locations = out_df.select(pl.col("loc_key").n_unique()).item()
-    in_ua_count = out_df.filter(pl.col("country_en") == "Ukraine").height
+    in_ua_count = out_df.filter(pl.col("born_in_ukraine")).height
 
-    print("\n=== T4 Clean & Geocode Summary ===")
+    print("\n=== T4 + T12 Clean & Geocode Summary ===")
     print(
         f"Raw rows in 01_raw_people.parquet   : {raw_row_count:,} ({raw_unique_qids:,} unique Q-IDs)"
     )
     print(f"Dropped (missing/invalid coords/name): {dropped_no_coords:,}")
     print(f"Clean unique people written         : {out_df.height:,}")
     print(f"  - Born inside modern Ukraine       : {in_ua_count:,}")
-    print(f"  - Born abroad (diaspora/nationals) : {out_df.height - in_ua_count:,}")
+    print(f"  - Ukrainian nationality/heritage   : {out_df.height - in_ua_count:,}")
     print(f"Unique normalized locations (locKey) : {unique_locations:,}")
     print(
         f"Output artifact                      : {PARQUET_OUT.relative_to(PROJECT_ROOT)}"
