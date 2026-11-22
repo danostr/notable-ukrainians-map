@@ -60,10 +60,14 @@ export function initSearch() {
 
     for (const person of state.allPeople) {
         if (person.geoTree.length > 0) {
-            const country = person.geoTree[person.geoTree.length - 1];
-            for (const zone of person.geoTree) {
-                if (zone && typeof zone === 'string' && zone.trim() !== '') {
-                    zonesMap.set(zone.trim(), zone === country ? 'Country' : country);
+            const country = String(person.geoTree[0]).trim();
+            if (country) {
+                zonesMap.set(country, 'Country');
+            }
+            if (person.geoTree.length >= 2) {
+                const region = String(person.geoTree[1]).trim();
+                if (region && region !== country) {
+                    zonesMap.set(region, country);
                 }
             }
         }
