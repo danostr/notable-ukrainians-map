@@ -44,6 +44,7 @@ USER_AGENT = (
 
 SCHEMA_VERSION = 2
 ALL_SOURCES: tuple[str, ...] = ("born", "citizen", "heritage", "encyclopedia")
+LOG_EVERY_N_ENTRIES = 200
 
 WKT_POINT_RE = re.compile(
     r"Point\(\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*\)",
@@ -51,6 +52,24 @@ WKT_POINT_RE = re.compile(
 )
 
 INVALID_JSON_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])')
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    mins, secs = divmod(seconds, 60)
+    if mins < 60:
+        return f"{int(mins)}m {secs:.1f}s"
+    hours, mins = divmod(mins, 60)
+    return f"{int(hours)}h {int(mins)}m {secs:.0f}s"
+
+
+def _format_bytes(num_bytes: int) -> str:
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    return f"{num_bytes / (1024 * 1024):.2f} MB"
 
 
 @dataclass(frozen=True)
@@ -284,7 +303,8 @@ def _parse_sparql_json(raw_bytes: bytes) -> dict[str, Any]:
         try:
             return json.loads(text, strict=False)
         except json.JSONDecodeError:
-            sanitized = INVALID_JSON_ESCAPE_RE.sub(r"\\\\", text)
+            # Escape lone backslashes (including trailing backslash before a quote)
+            sanitized = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", text)
             return json.loads(sanitized, strict=False)
 
 
@@ -293,10 +313,11 @@ def fetch_slice_with_retries(
     sparql: str,
     slice_name: str,
     max_retries: int = 4,
-) -> dict[str, Any]:
-    """Executes a SPARQL query with exponential backoff for 429/500/502/503/504 errors."""
+) -> tuple[dict[str, Any], int, float]:
+    """Executes a SPARQL query with exponential backoff; returns (data, payload_bytes, elapsed_s)."""
     backoff = 4.0
     for attempt in range(1, max_retries + 1):
+        req_start = time.perf_counter()
         try:
             response = client.post(
                 WDQS_ENDPOINT,
@@ -307,8 +328,17 @@ def fetch_slice_with_retries(
                 },
                 timeout=90.0,
             )
+            elapsed = time.perf_counter() - req_start
             if response.status_code == 200:
-                return _parse_sparql_json(response.content)
+                raw_bytes = response.content
+                parse_start = time.perf_counter()
+                parsed = _parse_sparql_json(raw_bytes)
+                parse_elapsed = time.perf_counter() - parse_start
+                print(
+                    f"  [net]   {slice_name} -> HTTP 200 ({_format_bytes(len(raw_bytes))}) "
+                    f"in {_format_duration(elapsed)} (JSON parse: {_format_duration(parse_elapsed)})"
+                )
+                return parsed, len(raw_bytes), time.perf_counter() - req_start
 
             if response.status_code in {429, 500, 502, 503, 504}:
                 retry_after = response.headers.get("Retry-After")
@@ -318,7 +348,7 @@ def fetch_slice_with_retries(
                     else backoff
                 )
                 print(
-                    f"  [!] HTTP {response.status_code} on {slice_name} "
+                    f"  [!] HTTP {response.status_code} on {slice_name} after {_format_duration(elapsed)} "
                     f"(attempt {attempt}/{max_retries}) — sleeping {wait_seconds:.1f}s..."
                 )
                 time.sleep(wait_seconds)
@@ -326,14 +356,16 @@ def fetch_slice_with_retries(
                 continue
 
             response.raise_for_status()
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
+        except (httpx.TimeoutException, httpx.TransportError, ValueError) as exc:
+            elapsed = time.perf_counter() - req_start
             if attempt == max_retries:
                 raise RuntimeError(
                     f"Failed slice {slice_name} after {max_retries} attempts"
                 ) from exc
             print(
-                f"  [!] Network timeout/error on {slice_name} ({exc.__class__.__name__}) "
-                f"(attempt {attempt}/{max_retries}) — sleeping {backoff:.1f}s..."
+                f"  [!] Bad/incomplete response on {slice_name} ({exc.__class__.__name__}) "
+                f"after {_format_duration(elapsed)} (attempt {attempt}/{max_retries}) — "
+                f"sleeping {backoff:.1f}s..."
             )
             time.sleep(backoff)
             backoff = min(backoff * 2.0, 30.0)
@@ -352,21 +384,40 @@ def _is_valid_cached_slice(slice_file: Path) -> bool:
         return False
 
 
+def _read_cached_bindings_count(slice_file: Path) -> int:
+    try:
+        payload = orjson.loads(slice_file.read_bytes())
+        meta = payload.get("_meta", {})
+        if isinstance(meta.get("bindings_count"), int):
+            return int(meta["bindings_count"])
+        return len(payload.get("results", {}).get("bindings", []))
+    except Exception:
+        return 0
+
+
 def _fetch_and_save_slice(
     client: httpx.Client,
     q_slice: QuerySlice,
     source: str,
     tag: str,
     refresh: bool,
-) -> None:
-    """Fetches a slice (auto-bisecting year ranges on WDQS timeout) and writes JSON."""
+) -> tuple[int, bool, float]:
+    """
+    Fetches a slice (auto-bisecting year ranges on WDQS timeout) and writes JSON.
+    Returns (bindings_count, was_fetched_from_network, elapsed_seconds).
+    """
+    slice_start = time.perf_counter()
     slice_file = RAW_DIR / f"slice_{q_slice.label}_{source}.json"
 
     if not refresh and _is_valid_cached_slice(slice_file):
-        print(f"  [skip] {tag} — cached (v{SCHEMA_VERSION})")
-        return
+        cached_count = _read_cached_bindings_count(slice_file)
+        print(
+            f"  [skip] {tag} — cached (v{SCHEMA_VERSION}, {cached_count:,} bindings, "
+            f"{_format_bytes(slice_file.stat().st_size)})"
+        )
+        return cached_count, False, time.perf_counter() - slice_start
 
-    print(f"  [fetch] {tag}...")
+    print(f"  [fetch] {tag} -> querying {WDQS_ENDPOINT}...")
     sparql = build_sparql_query(q_slice, source)
     can_split = (
         q_slice.start_year is not None
@@ -375,7 +426,7 @@ def _fetch_and_save_slice(
     )
 
     try:
-        data = fetch_slice_with_retries(
+        data, _payload_bytes, _net_elapsed = fetch_slice_with_retries(
             client,
             sparql,
             tag,
@@ -389,13 +440,23 @@ def _fetch_and_save_slice(
         left = _make_year_slice(q_slice.start_year, mid)
         right = _make_year_slice(mid + 1, q_slice.end_year)
         print(
-            f"  [split] {tag} timed out; bisecting into {left.label} & {right.label}..."
+            f"  [split] {tag} timed out after {_format_duration(time.perf_counter() - slice_start)}; "
+            f"bisecting into {left.label} & {right.label}..."
         )
         if slice_file.exists():
             slice_file.unlink()
-        _fetch_and_save_slice(client, left, source, f"{tag} -> {left.label}", refresh)
-        _fetch_and_save_slice(client, right, source, f"{tag} -> {right.label}", refresh)
-        return
+        left_count, _, _ = _fetch_and_save_slice(
+            client, left, source, f"{tag} -> {left.label}", refresh
+        )
+        right_count, _, _ = _fetch_and_save_slice(
+            client, right, source, f"{tag} -> {right.label}", refresh
+        )
+        total_split = left_count + right_count
+        print(
+            f"  [split-ok] {tag} -> combined {total_split:,} bindings "
+            f"in {_format_duration(time.perf_counter() - slice_start)}"
+        )
+        return total_split, True, time.perf_counter() - slice_start
 
     bindings_count = len(data.get("results", {}).get("bindings", []))
     data["_meta"] = {
@@ -404,28 +465,47 @@ def _fetch_and_save_slice(
         "source_query": source,
         "bindings_count": bindings_count,
     }
-    slice_file.write_bytes(orjson.dumps(data))
-    print(f"  [ok]    {tag} -> {bindings_count:,} raw bindings saved")
+    encoded = orjson.dumps(data)
+    slice_file.write_bytes(encoded)
+    total_elapsed = time.perf_counter() - slice_start
+    print(
+        f"  [ok]    {tag} -> {bindings_count:,} raw bindings saved "
+        f"({_format_bytes(len(encoded))}, total {_format_duration(total_elapsed)})"
+    )
     time.sleep(1.2)
+    return bindings_count, True, time.perf_counter() - slice_start
 
 
 def consolidate_raw_slices(raw_dir: Path, parquet_out: Path) -> pl.DataFrame:
     """Parses all v2 cached `slice_*.json` files into a typed Polars DataFrame."""
+    consolidate_start = time.perf_counter()
     slice_files = sorted(raw_dir.glob("slice_*.json"))
     if not slice_files:
         raise FileNotFoundError(f"No slice_*.json files found in {raw_dir}")
 
+    print(f"Scanning {len(slice_files)} raw slice files in {raw_dir}...")
     rows: list[dict[str, Any]] = []
     used_files = 0
-    for path in slice_files:
+    skipped_files = 0
+    entries_since_log = 0
+
+    for file_idx, path in enumerate(slice_files, start=1):
+        file_start = time.perf_counter()
         payload = orjson.loads(path.read_bytes())
         meta = payload.get("_meta", {})
         if meta.get("schema_version") != SCHEMA_VERSION:
+            skipped_files += 1
+            print(
+                f"  [skip-file] ({file_idx}/{len(slice_files)}) {path.name} "
+                f"(schema_version={meta.get('schema_version')!r} != {SCHEMA_VERSION})"
+            )
             continue
+
         used_files += 1
         slice_label = meta.get("slice_label", path.stem)
         source_query = meta.get("source_query", "unknown")
         bindings = payload.get("results", {}).get("bindings", [])
+        file_rows_added = 0
 
         for b in bindings:
             qid = _qid_from_uri(_binding_val(b, "person"))
@@ -466,12 +546,33 @@ def consolidate_raw_slices(raw_dir: Path, parquet_out: Path) -> pl.DataFrame:
                     "slice_label": slice_label,
                 }
             )
+            file_rows_added += 1
+            entries_since_log += 1
+
+            if entries_since_log >= LOG_EVERY_N_ENTRIES:
+                print(
+                    f"  [parse] {len(rows):,} entries processed "
+                    f"(file {file_idx}/{len(slice_files)}: {path.name}, "
+                    f"elapsed {_format_duration(time.perf_counter() - consolidate_start)})"
+                )
+                entries_since_log = 0
+
+        print(
+            f"  [file-ok] ({file_idx}/{len(slice_files)}) {path.name} -> "
+            f"+{file_rows_added:,} entries (total: {len(rows):,}) "
+            f"in {_format_duration(time.perf_counter() - file_start)}"
+        )
 
     if used_files == 0:
         raise RuntimeError(
             f"Found slice_*.json files in {raw_dir}, but none matched schema_version={SCHEMA_VERSION}. "
             "Run `python etl/01_extract.py` to fetch updated slices."
         )
+
+    print(
+        f"Parsed {len(rows):,} total entries from {used_files} slice files "
+        f"(skipped {skipped_files}) in {_format_duration(time.perf_counter() - consolidate_start)}."
+    )
 
     schema = {
         "qid": pl.String,
@@ -500,9 +601,14 @@ def consolidate_raw_slices(raw_dir: Path, parquet_out: Path) -> pl.DataFrame:
         "slice_label": pl.String,
     }
 
+    parquet_start = time.perf_counter()
     df = pl.DataFrame(rows, schema=schema)
     parquet_out.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(parquet_out, compression="zstd")
+    print(
+        f"Wrote Parquet ({_format_bytes(parquet_out.stat().st_size)}) "
+        f"in {_format_duration(time.perf_counter() - parquet_start)}."
+    )
     return df
 
 
@@ -512,6 +618,7 @@ def run_extraction(
     sources: list[str] | None = None,
 ) -> None:
     """Runs incremental slice extraction and consolidates into 01_raw_people.parquet."""
+    run_start = time.perf_counter()
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     active_sources = sources or list(ALL_SOURCES)
 
@@ -527,16 +634,37 @@ def run_extraction(
             f"[{', '.join(active_sources)}])..."
         )
 
+        cumulative_bindings = 0
+        fetched_count = 0
+        cached_count = 0
+
         with httpx.Client(http2=False) as client:
             for idx, (source, q_slice) in enumerate(tasks, start=1):
                 tag = f"[{idx}/{total_tasks}] {q_slice.label} ({source})"
-                _fetch_and_save_slice(client, q_slice, source, tag, refresh=refresh)
+                count, was_fetched, _slice_elapsed = _fetch_and_save_slice(
+                    client, q_slice, source, tag, refresh=refresh
+                )
+                cumulative_bindings += count
+                if was_fetched:
+                    fetched_count += 1
+                else:
+                    cached_count += 1
+
+                elapsed = time.perf_counter() - run_start
+                avg_per_task = elapsed / idx
+                eta = avg_per_task * (total_tasks - idx)
+                print(
+                    f"  [progress] {idx}/{total_tasks} done | fetched={fetched_count}, "
+                    f"cached={cached_count} | cumulative={cumulative_bindings:,} bindings | "
+                    f"elapsed={_format_duration(elapsed)} | eta={_format_duration(eta)}"
+                )
 
     print("\nConsolidating raw JSON slices into Parquet...")
     df = consolidate_raw_slices(RAW_DIR, PARQUET_OUT)
     unique_qids = df["qid"].n_unique()
     print(
-        f"Saved {df.height:,} raw bindings ({unique_qids:,} unique Q-IDs) -> {PARQUET_OUT}"
+        f"Saved {df.height:,} raw bindings ({unique_qids:,} unique Q-IDs) -> {PARQUET_OUT} "
+        f"(total run time: {_format_duration(time.perf_counter() - run_start)})"
     )
 
 
